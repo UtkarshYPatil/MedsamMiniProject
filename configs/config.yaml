@@ -1,0 +1,38 @@
+# Paths -- edit these for your machine
+paths:
+  dicom_root: "D:/datasets/LIDC-IDRI"          # TCIA image download
+  xml_root:   "D:/datasets/LIDC-XML-only"      # radiologist annotations (separate download)
+  processed:  "data/processed"
+  outputs:    "outputs"
+
+# MedSAM2
+model:
+  checkpoint: "checkpoints/MedSAM2_CTLesion.pt"
+  config: "configs/sam2.1_hiera_t512.yaml"
+  device: "cuda"
+  # alternative to benchmark against:
+  # checkpoint: "checkpoints/MedSAM2_latest.pt"
+
+# CT preprocessing
+preprocess:
+  window_level: -600      # lung window
+  window_width: 1500
+  roi_size: 96            # crop size in pixels around nodule centroid
+  roi_depth: 16           # slices above/below the centroid slice
+
+# Annotation handling
+annotation:
+  consensus_level: 0.5    # fraction of the 4 radiologists that must agree
+  min_nodule_diameter_mm: 3.0
+
+# Prompting
+prompt:
+  type: "bbox"            # bbox | point
+  bbox_padding_px: 5
+  propagate_slices: true  # use MedSAM2 volume propagation
+
+# Evaluation
+eval:
+  metrics: ["dice", "iou", "hd95"]
+  n_scans: 50             # cap for the Phase 2 baseline run
+  seed: 42
