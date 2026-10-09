@@ -1,6 +1,6 @@
 # Paths -- edit these for your machine
 paths:
-  dicom_root: "D:/datasets/LIDC-IDRI"          # TCIA image download
+  dicom_root: "E:/MiniProject/DATASET"        # TCIA image download
   xml_root:   "D:/datasets/LIDC-XML-only"      # radiologist annotations (separate download)
   processed:  "data/processed"
   outputs:    "outputs"
