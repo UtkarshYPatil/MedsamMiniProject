@@ -1,31 +1,30 @@
-# core
-torch>=2.3.0
-torchvision>=0.18.0
+# --- core ---
 numpy>=1.26
 scipy>=1.11
-
-# medical imaging
-pydicom>=2.4
-SimpleITK>=2.3
-nibabel>=5.2
-pylidc>=0.2.3          # LIDC-IDRI XML parsing + 4-radiologist consensus
-monai>=1.3
-
-# metrics / analysis
-scikit-image>=0.22
-scikit-learn>=1.4
 pandas>=2.2
-medpy>=0.4             # HD95
-
-# model download
-huggingface_hub>=0.23
-
-# viz / reporting
-matplotlib>=3.8
+pyyaml>=6.0
 tqdm>=4.66
 
-# config
-pyyaml>=6.0
+# --- medical imaging ---
+pydicom>=2.4
+SimpleITK>=2.3
+pylidc>=0.2.3            # LIDC-IDRI XML parsing + 4-reader consensus
+scikit-image>=0.22
+medpy>=0.4               # HD95
 
-# dev
+# --- model ---
+# torch: install FIRST, matched to your CUDA version, from pytorch.org
+#   e.g. pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+torch>=2.3.0
+torchvision>=0.18.0
+huggingface_hub>=0.23
+# sam2 comes from the MedSAM2 repo:
+#   git clone https://github.com/bowang-lab/MedSAM2.git external/MedSAM2
+#   pip install -e external/MedSAM2
+
+# --- tool ---
+streamlit>=1.37
+
+# --- dev ---
 pytest>=8.0
+matplotlib>=3.8

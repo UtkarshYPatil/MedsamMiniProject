@@ -1,38 +1,29 @@
-# Paths -- edit these for your machine
+# ---- dataset paths (verified 2026-10-14) ----
 paths:
-  dicom_root: "E:/MiniProject/DATASET"        # TCIA image download
-  xml_root:   "D:/datasets/LIDC-XML-only"      # radiologist annotations (separate download)
-  processed:  "data/processed"
+  dicom_root: "E:/MiniProject/DATASET_ct/lidc_idri"   # 1010 patient folders
+  xml_root:   "E:/MiniProject/LIDC-XML-only"          # 1319 xml files (reference; pylidc uses its own DB)
+  processed:  "E:/MiniProject/processed"              # ROI crops land here, off the repo
   outputs:    "outputs"
 
-# MedSAM2
 model:
   checkpoint: "checkpoints/MedSAM2_CTLesion.pt"
-  config: "configs/sam2.1_hiera_t512.yaml"
-  device: "cuda"
-  # alternative to benchmark against:
-  # checkpoint: "checkpoints/MedSAM2_latest.pt"
+  cfg_name:   "configs/sam2.1_hiera_t512.yaml"   # from the MedSAM2 repo
+  device:     "cuda"
 
-# CT preprocessing
 preprocess:
-  window_level: -600      # lung window
+  window_level: -600        # lung window
   window_width: 1500
-  roi_size: 96            # crop size in pixels around nodule centroid
-  roi_depth: 16           # slices above/below the centroid slice
+  roi_size:  128            # in-plane crop (px) around nodule centroid
+  roi_depth: 16             # slices each side of the centroid slice
 
-# Annotation handling
 annotation:
-  consensus_level: 0.5    # fraction of the 4 radiologists that must agree
-  min_nodule_diameter_mm: 3.0
+  consensus_level: 0.5      # agreement fraction across the 4 radiologists
+  min_diameter_mm: 3.0      # LIDC marks >=3mm nodules fully
 
-# Prompting
 prompt:
-  type: "bbox"            # bbox | point
   bbox_padding_px: 5
-  propagate_slices: true  # use MedSAM2 volume propagation
+  propagate: true           # use MedSAM2 volume propagation
 
-# Evaluation
 eval:
-  metrics: ["dice", "iou", "hd95"]
-  n_scans: 50             # cap for the Phase 2 baseline run
+  n_scans: 50               # cap for a first baseline run
   seed: 42

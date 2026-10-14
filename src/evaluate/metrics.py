@@ -1,60 +1,101 @@
-"""Segmentation metrics. All take boolean arrays of the same shape."""
+"""Segmentation metrics and physical measurements."""
 import numpy as np
+
+
+def _axis(region, which="major"):
+    """skimage renamed these in 0.26 -- support both."""
+    new = f"axis_{which}_length"
+    if hasattr(type(region), new) or new in getattr(region, "_extra_properties", {}):
+        try:
+            return float(getattr(region, new))
+        except Exception:
+            pass
+    try:
+        return float(getattr(region, new))
+    except AttributeError:
+        return float(getattr(region, f"{which}_axis_length"))
 
 
 def dice(pred, gt):
     pred, gt = pred.astype(bool), gt.astype(bool)
-    denom = pred.sum() + gt.sum()
-    if denom == 0:
-        return 1.0
-    return 2.0 * np.logical_and(pred, gt).sum() / denom
+    d = pred.sum() + gt.sum()
+    return 1.0 if d == 0 else float(2.0 * np.logical_and(pred, gt).sum() / d)
 
 
 def iou(pred, gt):
     pred, gt = pred.astype(bool), gt.astype(bool)
-    union = np.logical_or(pred, gt).sum()
-    if union == 0:
-        return 1.0
-    return np.logical_and(pred, gt).sum() / union
+    u = np.logical_or(pred, gt).sum()
+    return 1.0 if u == 0 else float(np.logical_and(pred, gt).sum() / u)
 
 
 def hd95(pred, gt, spacing=None):
-    """95th-percentile Hausdorff distance in mm (needs medpy)."""
-    from medpy.metric.binary import hd95 as _hd95
+    """95th-percentile Hausdorff distance in mm. Requires medpy."""
+    try:
+        from medpy.metric.binary import hd95 as _h
+    except ImportError:
+        return float("nan")
     if pred.sum() == 0 or gt.sum() == 0:
         return float("nan")
-    return float(_hd95(pred.astype(bool), gt.astype(bool), voxelspacing=spacing))
+    return float(_h(pred.astype(bool), gt.astype(bool), voxelspacing=spacing))
 
 
 def volume_mm3(mask, spacing_zyx):
-    """spacing_zyx = (slice_thickness, pixel_y, pixel_x) in mm."""
-    return float(mask.sum() * np.prod(spacing_zyx))
+    return float(mask.sum() * float(np.prod(spacing_zyx)))
 
 
 def max_diameter_mm(mask_3d, spacing_zyx):
-    """Largest in-plane diameter across slices -- what Fleischner-style sizing uses."""
-    from skimage.measure import regionprops, label
+    """
+    Largest in-plane long-axis diameter across slices.
+    This is the number nodule-sizing guidelines are keyed on.
+    """
+    from skimage.measure import label, regionprops
+    py, px = float(spacing_zyx[1]), float(spacing_zyx[2])
+    scale = (py + px) / 2.0
     best = 0.0
-    py, px = spacing_zyx[1], spacing_zyx[2]
     for z in range(mask_3d.shape[0]):
         sl = mask_3d[z]
         if not sl.any():
             continue
         for r in regionprops(label(sl)):
-            d = r.major_axis_length * ((py + px) / 2)
-            best = max(best, d)
+            best = max(best, _axis(r, "major") * scale)
     return float(best)
 
 
-def mean_hu(volume_hu, mask):
+def mean_diameter_mm(mask_3d, spacing_zyx):
+    """Average of long and short axis -- the convention many protocols use."""
+    from skimage.measure import label, regionprops
+    py, px = float(spacing_zyx[1]), float(spacing_zyx[2])
+    scale = (py + px) / 2.0
+    best, best_area = 0.0, 0
+    for z in range(mask_3d.shape[0]):
+        sl = mask_3d[z]
+        if not sl.any():
+            continue
+        for r in regionprops(label(sl)):
+            if r.area > best_area:
+                best_area = r.area
+                best = (_axis(r, "major") + _axis(r, "minor")) / 2.0 * scale
+    return float(best)
+
+
+def hu_stats(vol_hu, mask):
     if mask.sum() == 0:
-        return float("nan")
-    return float(volume_hu[mask].mean())
+        return {"hu_mean": float("nan"), "hu_std": float("nan"), "hu_p90": float("nan")}
+    v = vol_hu[mask]
+    return {
+        "hu_mean": float(v.mean()),
+        "hu_std": float(v.std()),
+        "hu_p90": float(np.percentile(v, 90)),
+    }
 
 
-def summarize(rows):
-    """rows: list of dicts -> per-metric mean/std."""
-    import pandas as pd
-    df = pd.DataFrame(rows)
-    num = df.select_dtypes("number")
-    return df, num.agg(["mean", "std", "min", "max"]).T
+def measure(mask, vol_hu, spacing_zyx):
+    """All measurements for one nodule mask."""
+    out = {
+        "volume_mm3": volume_mm3(mask, spacing_zyx),
+        "diameter_max_mm": max_diameter_mm(mask, spacing_zyx),
+        "diameter_mean_mm": mean_diameter_mm(mask, spacing_zyx),
+        "n_voxels": int(mask.sum()),
+    }
+    out.update(hu_stats(vol_hu, mask))
+    return out
