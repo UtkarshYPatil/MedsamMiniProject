@@ -1,39 +1,34 @@
-# data — never commit medical images
-data/raw/
-data/interim/
-data/processed/
+# never commit medical images or weights
+/data/
 *.dcm
+*.npz
 *.mhd
 *.raw
 *.nii
 *.nii.gz
-LIDC-XML-only/
-tcia-manifests/
-
-# model weights
-checkpoints/
+/checkpoints/
 *.pt
 *.pth
-
-# outputs (keep results.csv + figures, drop the bulk)
-outputs/masks/
-outputs/logs/
-!outputs/results.csv
-!outputs/figures/*.png
-
-# external repos
 external/
+
+# outputs: keep the csv results, drop the bulk
+/outputs/**
+!/outputs/
+!/outputs/*.csv
 
 # python
 __pycache__/
 *.py[cod]
 .venv/
 venv/
+.pytest_cache/
 .ipynb_checkpoints/
 *.egg-info/
-.pytest_cache/
 
 # os / editor
 .DS_Store
-.vscode/
 .idea/
+.vscode/
+
+# archived supersededscripts
+_archive/
