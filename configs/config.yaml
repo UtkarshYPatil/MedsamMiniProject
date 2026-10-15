@@ -21,7 +21,13 @@ annotation:
   min_diameter_mm: 3.0      # LIDC marks >=3mm nodules fully
 
 prompt:
-  bbox_padding_px: 5
+  # 0, set by ablation on 2026-10-14 (scripts/06_ablate.py, outputs/ablation_padding.csv).
+  # Dice falls monotonically as padding grows -- 0.789 / 0.687 / 0.534 / 0.228
+  # for 0 / 2 / 5 / 10 px -- and the diameter bias tracks it exactly
+  # (-0.02 / +1.17 / +3.26 / +10.03 mm). MedSAM2 fills toward the prompt box,
+  # so any padding is segmented as nodule. The official reference
+  # (medsam2_infer_3D_CT.py) likewise has its box expansion commented out.
+  bbox_padding_px: 0
   propagate: true           # use MedSAM2 volume propagation
 
 eval:

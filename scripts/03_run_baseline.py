@@ -13,7 +13,12 @@ import argparse
 import json
 import sys
 import time
+import warnings
 from pathlib import Path
+
+# sam2 is loud: a missing optional _C extension and flash-attention fallbacks.
+# Neither affects results; the spam buries the numbers.
+warnings.filterwarnings("ignore", category=UserWarning)
 
 import numpy as np
 import pandas as pd
