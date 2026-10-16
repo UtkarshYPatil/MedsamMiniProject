@@ -17,6 +17,8 @@ external/
 !/outputs/*.csv
 !/outputs/*.png
 !/outputs/*.json
+!/outputs/figures/
+!/outputs/figures/*.png
 
 # python
 __pycache__/
