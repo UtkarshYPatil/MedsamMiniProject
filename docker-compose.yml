@@ -5,9 +5,13 @@
 #   open http://localhost:8501        UI
 #   open http://localhost:8000/docs   API
 #
-# Create a phantom case from the sidebar and segment it to exercise the whole
-# path. For real inference, drop MedSAM2_CTLesion.pt into ./checkpoints and
-# set DRY_RUN=0 in .env.
+# Before starting, put MedSAM2_CTLesion.pt in ./checkpoints -- the weights are
+# research-and-education-use only and are deliberately not baked into the image.
+# Without it the worker refuses to start and says so.
+#
+# To demonstrate the stack with no checkpoint and no dataset, set DRY_RUN=1 and
+# create a phantom case from the sidebar. Every number produced that way is
+# labelled a dry run, in the API response and in the UI, because it is made up.
 #
 # For GPU, overlay the second file:
 #   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
@@ -20,7 +24,7 @@ x-worker-env: &worker-env
   QUEUE_NAME: segmentation
   CHECKPOINT: /app/checkpoints/MedSAM2_CTLesion.pt
   MODEL_CFG: configs/sam2.1_hiera_t512.yaml
-  DRY_RUN: ${DRY_RUN:-1}
+  DRY_RUN: ${DRY_RUN:-0}
   JOB_TIMEOUT: ${JOB_TIMEOUT:-600}
 
 services:
@@ -58,8 +62,10 @@ services:
       REDIS_URL: redis://redis:6379/0
       DATA_DIR: /data
       QUEUE_NAME: segmentation
-      DEVICE: ${DEVICE:-cpu}
-      DRY_RUN: ${DRY_RUN:-1}
+      DEVICE: ${DEVICE:-auto}
+      DRY_RUN: ${DRY_RUN:-0}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-64}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
     ports:
       - "${API_PORT:-8000}:8000"
     volumes:

@@ -10,7 +10,10 @@ drag) and is used exactly as given. No padding is added: scripts/06_ablate.py
 showed Dice falling 0.804 -> 0.266 as padding grows from 0 to 10 px, because
 MedSAM2 fills toward the box it is given.
 """
+import json
+import os
 import time
+from datetime import datetime, timezone
 
 import numpy as np
 
@@ -18,6 +21,48 @@ from services.common import settings, store
 
 _segmenter = None
 _device = None
+
+# What the worker actually resolved, published for /healthz to read.
+#
+# Only the worker can answer "is this running on a GPU?" -- it is the only
+# container with torch. The API used to report its own DEVICE setting, which
+# said "cpu" while the worker ran on cuda. Reporting a value the reporting
+# process cannot verify is how a dashboard ends up lying.
+STATUS_KEY = "worker:status"
+
+
+def checkpoint_present() -> bool:
+    return bool(settings.CHECKPOINT) and os.path.exists(settings.CHECKPOINT)
+
+
+def worker_status() -> dict:
+    return {
+        "device": resolve_device(),
+        "device_detail": device_detail(),
+        "device_requested": settings.DEVICE,
+        "dry_run": bool(settings.DRY_RUN),
+        "checkpoint": settings.CHECKPOINT,
+        "checkpoint_present": checkpoint_present(),
+        "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+
+
+def publish_status(conn=None) -> dict:
+    """
+    Best-effort: write the worker's resolved state where the API can see it.
+
+    Never raises. A status line failing to publish must not take down the
+    worker that is doing the actual work.
+    """
+    st = worker_status()
+    try:
+        if conn is None:
+            from redis import Redis
+            conn = Redis.from_url(settings.REDIS_URL)
+        conn.set(STATUS_KEY, json.dumps(st))
+    except Exception:
+        pass
+    return st
 
 
 def resolve_device() -> str:
@@ -107,6 +152,7 @@ def segment_case(case_id: str, prompt_z: int, box, propagate: bool = True) -> di
 
     meas = as_dict(summarize(mask, vol_hu, spacing))
     store.save_mask(_job_id(), mask, prompt_z, box)
+    publish_status()        # refresh the timestamp so staleness is visible
 
     n_slices = int((mask.reshape(mask.shape[0], -1).sum(1) > 0).sum())
     return {

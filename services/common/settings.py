@@ -35,6 +35,15 @@ DATABASE_URL = os.environ.get(
 QUEUE_NAME = os.environ.get("QUEUE_NAME", "segmentation")
 API_URL = os.environ.get("API_URL", "http://api:8000")
 
+# Comma-separated origins, or "*". Fine as "*" on localhost; narrow it for
+# anything reachable from a network.
+CORS_ORIGINS = [o.strip() for o in
+                os.environ.get("CORS_ORIGINS", "*").split(",") if o.strip()]
+
+# An ROI is about 1 MB. This is generous for a crop and still refuses a whole
+# series, which would be a 200 MB upload the model cannot consume anyway.
+MAX_UPLOAD_MB = _int("MAX_UPLOAD_MB", 64)
+
 # ------------------------------------------------------------------- model
 CHECKPOINT = os.environ.get("CHECKPOINT", "checkpoints/MedSAM2_CTLesion.pt")
 MODEL_CFG = os.environ.get("MODEL_CFG", "configs/sam2.1_hiera_t512.yaml")

@@ -7,4 +7,8 @@ psycopg[binary]>=3.2
 redis>=5.0
 rq>=1.16
 numpy>=1.26
+# scipy is only for connected components in the auto-prompt. The
+# fallback in autoprompt.py works without it, but scipy's labelling is
+# much faster and /suggest is meant to feel instant.
+scipy>=1.11
 pillow>=10.4

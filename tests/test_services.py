@@ -328,3 +328,277 @@ def test_resolution_is_cached(monkeypatch):
     t2 = _fresh_tasks(monkeypatch, "cpu")
     t2._device = "cuda"                 # pretend it already resolved
     assert t2.resolve_device() == "cuda", "a resolved device must not be recomputed"
+
+
+# ---------------------------------------------------------- module integrity
+
+def test_every_module_imports():
+    """
+    Import every module in the project.
+
+    compileall only proves the syntax parses. This caught a real bug: a
+    docstring in src/report/sizing.py was closed early, which left a section
+    heading as a bare statement. Syntax-valid, import-fatal.
+    """
+    import importlib
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    skipped, failed = [], []
+    for path in sorted(root.glob("src/**/*.py")) + sorted(root.glob("services/**/*.py")):
+        if path.name == "__init__.py":
+            continue
+        mod = ".".join(path.relative_to(root).with_suffix("").parts)
+        try:
+            importlib.import_module(mod)
+        except ImportError as e:
+            # A missing third-party package is an environment fact, not a bug
+            # in the module. Anything else -- NameError, SyntaxError, a bad
+            # relative import -- is the module's own fault and must fail.
+            skipped.append((mod, str(e)))
+        except Exception as e:
+            failed.append((mod, f"{type(e).__name__}: {e}"))
+
+    assert not failed, "modules that import-fail on their own account:\n" + \
+        "\n".join(f"  {m}: {e}" for m, e in failed)
+
+
+# ------------------------------------------------------------- auto-prompt
+
+def _slab_volume(shape=(33, 128, 128)):
+    """A volume whose only bright object is a chest-wall-like slab at the edge."""
+    vol = np.full(shape, -800, dtype=np.int16)
+    vol[:, :, :12] = 40                       # a wall running down one side
+    return vol
+
+
+def test_suggest_box_finds_a_phantom_nodule():
+    from services.common import autoprompt, store
+    vol, _ = store.make_phantom(diameter_mm=9.0)
+
+    z, box, info = autoprompt.suggest_box(vol)
+    assert z is not None and box is not None, info
+
+    # The phantom sphere sits at the centre of the volume.
+    assert abs(z - vol.shape[0] // 2) <= 3, f"slice {z} is not near the nodule"
+    cx = (box[0] + box[2]) / 2
+    cy = (box[1] + box[3]) / 2
+    assert abs(cx - vol.shape[2] / 2) < 12 and abs(cy - vol.shape[1] / 2) < 12, \
+        f"box centre {(cx, cy)} is not on the sphere"
+    assert box[2] > box[0] and box[3] > box[1]
+
+
+def test_suggest_box_refuses_a_volume_holding_only_chest_wall():
+    """
+    The failure this exists to prevent: a 3185 mm3 "nodule" that was the chest
+    wall. Every component touching the border is dropped, so when the wall is
+    all there is, the answer must be "nothing plausible" rather than the wall.
+    """
+    from services.common import autoprompt
+    z, box, info = autoprompt.suggest_box(_slab_volume())
+
+    assert z is None and box is None, \
+        f"proposed {box} on a volume containing no nodule -- {info}"
+    assert info.get("dropped_touching_border", 0) >= 1
+
+
+def test_suggest_box_prefers_a_nodule_over_a_larger_chest_wall():
+    """The wall is far bigger. Size must not win against a border component."""
+    from services.common import autoprompt, store
+    vol, _ = store.make_phantom(diameter_mm=8.0)
+    vol = vol.copy()
+    vol[:, :, :12] = 40                       # add a wall beside the nodule
+
+    z, box, info = autoprompt.suggest_box(vol)
+    assert box is not None, info
+    cx = (box[0] + box[2]) / 2
+    assert cx > 24, f"box centre x={cx} landed on the wall, not the nodule"
+    assert info.get("dropped_touching_border", 0) >= 1
+
+
+def test_suggest_box_agrees_with_and_without_scipy(monkeypatch):
+    """
+    The union-find fallback runs when scipy is absent. If it disagrees with
+    scipy, the API and the worker would propose different boxes for the same
+    case depending on which image answered.
+    """
+    from services.common import autoprompt, store
+    vol, _ = store.make_phantom(diameter_mm=9.0)
+
+    with_scipy = autoprompt.suggest_box(vol)
+    monkeypatch.setattr(autoprompt, "_label", autoprompt._label_numpy)
+    without = autoprompt.suggest_box(vol)
+
+    assert with_scipy[0] == without[0]
+    assert with_scipy[1] == without[1]
+
+
+def test_centred_fallback_stays_inside_the_volume():
+    from services.common import autoprompt
+    z, box = autoprompt.centred_fallback((33, 64, 64), half=16)
+    assert 0 <= z < 33
+    assert box[0] >= 0 and box[1] >= 0 and box[2] <= 64 and box[3] <= 64
+    assert box[2] > box[0] and box[3] > box[1]
+
+
+# ------------------------------------------------------- shape plausibility
+
+def _mask_with(shape, zslice, ys, xs):
+    m = np.zeros(shape, dtype=bool)
+    m[zslice, ys, xs] = True
+    return m
+
+
+def test_slab_shape_drops_confidence_to_low():
+    """The chest-wall mask measured 1.77; no real nodule in 137 reached 1.6."""
+    from src.report.sizing import flag_quality
+    mask = _mask_with((8, 64, 64), slice(1, 7), slice(20, 40), slice(20, 40))
+    m = {"n_voxels": 4000, "diameter_mean_mm": 17.4, "diameter_max_mm": 30.8}
+
+    level, flags = flag_quality(mask, m, "solid")
+    assert level == "low"
+    assert any("slab-like" in f for f in flags), flags
+
+
+def test_real_nodule_ratios_are_not_flagged_as_slabs():
+    """Every ratio observed across the 137-nodule set must stay unflagged."""
+    from src.report.sizing import flag_quality
+    mask = _mask_with((8, 64, 64), slice(2, 6), slice(28, 36), slice(28, 36))
+
+    for ratio in (1.02, 1.16, 1.38, 1.55):       # min, median, p95, max observed
+        m = {"n_voxels": 500, "diameter_mean_mm": 8.0,
+             "diameter_max_mm": 8.0 * ratio}
+        _, flags = flag_quality(mask, m, "solid")
+        assert not any("slab-like" in f for f in flags), \
+            f"ratio {ratio} seen on real nodules was flagged: {flags}"
+
+
+def test_mask_touching_the_roi_edge_is_flagged():
+    from src.report.sizing import flag_quality
+    mask = _mask_with((8, 64, 64), slice(2, 6), slice(0, 10), slice(20, 30))
+    m = {"n_voxels": 500, "diameter_mean_mm": 8.0, "diameter_max_mm": 9.0}
+
+    level, flags = flag_quality(mask, m, "solid")
+    assert level in ("medium", "low")
+    assert any("edge of the ROI" in f for f in flags), flags
+
+
+def test_a_contained_mask_is_not_flagged_for_edges():
+    from src.report.sizing import flag_quality
+    mask = _mask_with((8, 64, 64), slice(0, 8), slice(20, 40), slice(20, 40))
+    m = {"n_voxels": 500, "diameter_mean_mm": 8.0, "diameter_max_mm": 9.0}
+
+    _, flags = flag_quality(mask, m, "solid")
+    # Z spans the full depth deliberately: that is legitimate for a large
+    # nodule in a tight crop and must not trigger the in-plane edge check.
+    assert not any("edge of the ROI" in f for f in flags), flags
+
+
+def test_flag_quality_survives_a_mask_without_indexing():
+    """The edge check is defensive; a non-array mask must not crash sizing."""
+    from src.report.sizing import flag_quality
+
+    class NotAnArray:
+        ndim = 3
+        shape = (4, 4, 4)
+        def reshape(self, *a):
+            return np.zeros((4, 16), dtype=bool)
+
+    level, flags = flag_quality(NotAnArray(), {
+        "n_voxels": 500, "diameter_mean_mm": 8.0, "diameter_max_mm": 9.0}, "solid")
+    assert level in ("high", "medium", "low")
+
+
+# ------------------------------------------------------------ upload limits
+
+def test_upload_cap_is_configurable_and_sane():
+    import importlib
+    from services.common import settings as s
+    importlib.reload(s)
+    assert 1 <= s.MAX_UPLOAD_MB <= 1024
+    assert s.CORS_ORIGINS, "an empty origin list would reject every browser call"
+
+
+def test_upload_cap_reads_the_environment(monkeypatch):
+    import importlib
+    monkeypatch.setenv("MAX_UPLOAD_MB", "7")
+    monkeypatch.setenv("CORS_ORIGINS", "http://a.test, http://b.test")
+    from services.common import settings as s
+    importlib.reload(s)
+    try:
+        assert s.MAX_UPLOAD_MB == 7
+        assert s.CORS_ORIGINS == ["http://a.test", "http://b.test"]
+    finally:
+        monkeypatch.undo()
+        importlib.reload(s)
+
+
+def test_device_default_is_auto(monkeypatch):
+    import importlib
+    monkeypatch.delenv("DEVICE", raising=False)
+    from services.common import settings as s
+    importlib.reload(s)
+    try:
+        assert s.DEVICE == "auto", \
+            "the default must self-detect, or a laptop without a GPU crashes"
+    finally:
+        monkeypatch.undo()
+        importlib.reload(s)
+
+
+# ----------------------------------------------------------- worker status
+
+def test_worker_status_reports_what_it_can_verify(monkeypatch):
+    import importlib
+    monkeypatch.setenv("CHECKPOINT", "/nonexistent/model.pt")
+    from services.common import settings as s
+    importlib.reload(s)
+    from services.worker import tasks
+    importlib.reload(tasks)
+    try:
+        st = tasks.worker_status()
+        assert st["checkpoint_present"] is False
+        assert st["device"] in ("cpu", "cuda")
+        assert st["device_requested"] == s.DEVICE
+        assert st["updated_at"]
+    finally:
+        monkeypatch.undo()
+        importlib.reload(s)
+        importlib.reload(tasks)
+
+
+def test_checkpoint_present_detects_a_real_file(tmp_path, monkeypatch):
+    import importlib
+    ckpt = tmp_path / "model.pt"
+    ckpt.write_bytes(b"not a real checkpoint, but it exists")
+    monkeypatch.setenv("CHECKPOINT", str(ckpt))
+    from services.common import settings as s
+    importlib.reload(s)
+    from services.worker import tasks
+    importlib.reload(tasks)
+    try:
+        assert tasks.checkpoint_present() is True
+    finally:
+        monkeypatch.undo()
+        importlib.reload(s)
+        importlib.reload(tasks)
+
+
+def test_publish_status_never_raises_without_redis(monkeypatch):
+    """
+    A status line is telemetry. If it can throw, it can take down the worker
+    that is doing the real work.
+    """
+    import importlib
+    monkeypatch.setenv("REDIS_URL", "redis://127.0.0.1:1/0")   # nothing there
+    from services.common import settings as s
+    importlib.reload(s)
+    from services.worker import tasks
+    importlib.reload(tasks)
+    try:
+        st = tasks.publish_status()          # must not raise
+        assert st["device"] in ("cpu", "cuda")
+    finally:
+        monkeypatch.undo()
+        importlib.reload(s)
+        importlib.reload(tasks)

@@ -55,12 +55,19 @@ python scripts\02_prepare_data.py --limit 300
 python scripts\04_sanity_check.py          # LOOK AT THE PNG
 python scripts\03_run_baseline.py --limit 50
 python scripts\05_calibrate_density.py
+python scripts\09_interreader.py          # what Dice can a human even reach?
 streamlit run app\app.py
 ```
 
 `02_prepare_data.py` appends to the manifest, so `--start 300 --limit 300`
 resumes without redoing work. `03_run_baseline.py --dry-run` swaps in a dummy
 segmenter for pipeline testing without a GPU; its numbers are meaningless.
+
+`09_interreader.py` measures how much the four radiologists disagree with each
+other on the same nodules, which is the ceiling our Dice is competing against.
+Run it before trying to improve accuracy: if a single reader scores 0.85
+against the same consensus the model is scored against, then 0.804 has about
+0.05 of headroom and effort is better spent on detection.
 
 ## Data
 
@@ -119,17 +126,26 @@ docker compose up --build
 # UI  http://localhost:8501     API  http://localhost:8000/docs
 ```
 
-Comes up with **no dataset and no GPU** — `DRY_RUN=1` substitutes the dummy
-segmenter and the UI says so. Create a phantom case in the sidebar and press
-Segment to exercise the whole path. For real inference, put
-`MedSAM2_CTLesion.pt` in `checkpoints/` and set `DRY_RUN=0`. For GPU, add
-`-f docker-compose.gpu.yml`. Details and hosting notes in
+Needs **no dataset and no GPU**, but it does need the checkpoint: put
+`MedSAM2_CTLesion.pt` in `checkpoints/` (`python scripts/download_checkpoint.py`).
+The weights are research-and-education-use only, so they are not baked into the
+image; without them the worker refuses to start and the log says why. Real
+inference is the default — set `DRY_RUN=1` only to demonstrate the plumbing, and
+every number it then produces is labelled as invented.
+
+`DEVICE=auto` picks the GPU when one is visible and falls back to CPU when it is
+not. For GPU, add `-f docker-compose.gpu.yml`. Upload a case or create a phantom
+in the sidebar, then press **Segment** — the prompt box is proposed for you.
+Details and hosting notes in
 [`docs/phase3_deployment.md`](docs/phase3_deployment.md).
 
 ## Known limitations
 
-- **Prompts are not automatic.** Metrics are conditional on a correct box;
-  automatic detection is Phase 3.
+- **Detection is not automatic.** The tool proposes a prompt box inside an ROI
+  crop, which is enough for one button in the UI, but it does not find nodules
+  in a whole scan. It assumes the nodule is roughly central and discards
+  anything touching the edge of the crop. All metrics remain conditional on the
+  box being right, which is why every result carries a confidence flag.
 - **Density classification is unvalidated.** On 30 nodules it agreed with
   radiologist texture ratings 60% of the time, and every error was a
   reader-rated *solid* nodule that attenuates like ground glass. HU and

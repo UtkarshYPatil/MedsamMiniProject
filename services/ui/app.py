@@ -31,6 +31,12 @@ CONF = {
 st.set_page_config(page_title="Nodule measurement assistant", layout="wide")
 
 
+@st.cache_data(show_spinner=False, ttl=600)
+def suggest_for(case_id: str):
+    """Ask the API where the nodule probably is. Cached: it is deterministic."""
+    return api("GET", f"/api/cases/{case_id}/suggest")
+
+
 def api(method, path, **kw):
     r = requests.request(method, f"{API}{path}", timeout=kw.pop("timeout", 30), **kw)
     r.raise_for_status()
@@ -81,9 +87,30 @@ if cfg.get("dry_run"):
 # -------------------------------------------------------------------- case
 with st.sidebar:
     st.header("Case")
-    st.caption(f"device `{cfg.get('device')}` · queue {health.get('workers', 0)} waiting")
+
+    # The device shown is the one the WORKER resolved, not the API's setting.
+    # The API has no torch, so its own DEVICE value said "cpu" on a GPU host.
+    wk = health.get("worker") or {}
+    queued = health.get("queued", health.get("workers", 0))
+    alive = health.get("workers_alive")
+
+    if wk:
+        st.caption(f"running on `{wk.get('device_detail', wk.get('device', '?'))}` · "
+                   f"{queued} queued")
+    else:
+        st.caption(f"{queued} queued · the worker has not reported in yet")
+
+    if alive == 0:
+        st.error("No worker is connected, so jobs will queue and never run. "
+                 "Check the worker container: `docker compose logs worker`.",
+                 icon="🛑")
+
+    if wk and not wk.get("checkpoint_present") and not wk.get("dry_run"):
+        st.error("The worker has no model checkpoint, so segmentation will fail.",
+                 icon="🛑")
 
     cases = api("GET", "/api/cases").get("cases", [])
+
     labels = {c["case_id"]: f"{c['case_id']}  ({c['source']})" for c in cases}
 
     if cases:
@@ -129,21 +156,60 @@ if case["source"] == "phantom":
 # ------------------------------------------------------------------ prompt
 left, right = st.columns([3, 2], gap="large")
 
+suggestion = suggest_for(case_id)
+auto_z = int(suggestion["slice"])
+auto_box = [float(v) for v in suggestion["box"]]
+found = suggestion.get("source") == "auto"
+
 with left:
     st.subheader("Image")
-    z = st.slider("Slice", 0, D - 1, D // 2)
+
+    # The slider browses the stack. The prompt defaults to the slice the
+    # suggestion landed on, so moving the slider to look around does not
+    # silently change what gets segmented.
+    z = st.slider("Slice", 0, D - 1, auto_z, key=f"view_{case_id}")
     st.image(api_image(f"/api/cases/{case_id}/slice/{z}.png"),
              width="stretch", caption=f"slice {z} of {D - 1}")
 
-    st.markdown("**Prompt** — place a box around the nodule on this slice")
-    c1, c2, c3 = st.columns(3)
-    cx = c1.number_input("centre x", 0, W - 1, W // 2)
-    cy = c2.number_input("centre y", 0, H - 1, H // 2)
-    half = c3.number_input("half-size (px)", 4, min(H, W) // 2, 16)
+    if found:
+        st.success(f"Found a likely nodule on **slice {auto_z}** "
+                   f"({suggestion['info'].get('voxels', '?')} voxels, spanning "
+                   f"{suggestion['info'].get('slices_spanned', '?')} slices). "
+                   f"Press Segment.", icon="✅")
+    else:
+        st.warning("No likely nodule found automatically, so the box below is "
+                   "just centred. Check it before segmenting.", icon="⚠️")
 
-    box = [max(0, cx - half), max(0, cy - half),
-           min(W - 1, cx + half), min(H - 1, cy + half)]
-    st.caption(f"box = {box}  ·  the model is given this and nothing else")
+    prompt_z, box = auto_z, auto_box
+
+    with st.expander("Adjust the prompt"):
+        st.caption(
+            "The automatic box assumes the nodule is near the middle of the "
+            "crop and ignores anything touching the edge, which is where the "
+            "chest wall enters. Override it if it has picked the wrong thing."
+        )
+        if st.checkbox("Prompt the slice I am viewing instead",
+                       value=False, key=f"usez_{case_id}"):
+            prompt_z = z
+
+        cx_d = int(round((auto_box[0] + auto_box[2]) / 2))
+        cy_d = int(round((auto_box[1] + auto_box[3]) / 2))
+        half_d = max(4, int(round(max(auto_box[2] - auto_box[0],
+                                      auto_box[3] - auto_box[1]) / 2)))
+
+        c1, c2, c3 = st.columns(3)
+        cx = c1.number_input("centre x", 0, W - 1, cx_d, key=f"cx_{case_id}")
+        cy = c2.number_input("centre y", 0, H - 1, cy_d, key=f"cy_{case_id}")
+        half = c3.number_input("half-size (px)", 4, min(H, W) // 2, half_d,
+                               key=f"hs_{case_id}")
+
+        if (cx, cy, half) != (cx_d, cy_d, half_d):
+            box = [float(max(0, cx - half)), float(max(0, cy - half)),
+                   float(min(W - 1, cx + half)), float(min(H - 1, cy + half))]
+            st.caption("Using your box instead of the automatic one.")
+
+    st.caption(f"prompt → slice {prompt_z}, box {[int(v) for v in box]} · "
+               f"the model is given this and nothing else")
 
     run = st.button("Segment", type="primary", width="stretch")
 
@@ -153,7 +219,7 @@ with right:
 
     if run:
         job = api("POST", f"/api/cases/{case_id}/segment",
-                  json={"slice": int(z), "box": [float(v) for v in box]})
+                  json={"slice": int(prompt_z), "box": [float(v) for v in box]})
         st.session_state["job_id"] = job["job_id"]
 
     job_id = st.session_state.get("job_id")

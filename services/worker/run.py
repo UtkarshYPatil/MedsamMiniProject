@@ -41,12 +41,28 @@ def main():
                     "-f docker-compose.gpu.yml and check the host with: "
                     "docker run --rm --gpus all nvidia/cuda:12.8.0-base-ubuntu24.04 nvidia-smi")
 
+    from services.worker.tasks import checkpoint_present, publish_status
     if not settings.DRY_RUN:
+        if not checkpoint_present():
+            # Refuse to start rather than accept jobs it cannot serve. The
+            # alternative -- a traceback on every job -- hides the one fact
+            # that matters behind a per-request error.
+            log.error("no checkpoint at %s", settings.CHECKPOINT)
+            log.error("Place MedSAM2_CTLesion.pt in ./checkpoints (it is not "
+                      "shipped in the image: the weights are research-and-"
+                      "education-use only), or set DRY_RUN=1 to run the dummy "
+                      "segmenter, whose numbers are meaningless.")
+            sys.exit(2)
+
         # Pay the model load now, at boot, rather than on the first user's job.
         from services.worker.tasks import get_segmenter
         log.info("loading the model...")
         get_segmenter()
         log.info("model ready on %s", dev)
+
+    # Tell /healthz what this worker actually resolved, so the UI can stop
+    # guessing from the API's own environment.
+    publish_status(conn)
 
     # SimpleWorker runs jobs in-process instead of forking. Forking per job
     # would discard the loaded model every time, which on CPU costs more than

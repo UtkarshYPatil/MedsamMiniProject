@@ -33,17 +33,32 @@ docker compose up --build
 | API docs | http://localhost:8000/docs |
 | Health | http://localhost:8000/healthz |
 
-It comes up with **no dataset and no GPU**. `DRY_RUN=1` is the default, so the
-dummy segmenter stands in for the model and the UI shows a warning banner
-saying so. Create a phantom case from the sidebar and press Segment to
-exercise the whole path.
-
-### Real inference
+It needs **no dataset and no GPU**, but it does need the checkpoint:
 
 1. Put `MedSAM2_CTLesion.pt` in `./checkpoints/`
    (`python scripts/download_checkpoint.py`)
-2. Set `DRY_RUN=0` in `.env`
-3. `docker compose up --build`
+2. `docker compose up --build`
+
+The weights are not in the image — they are research-and-education-use only, so
+redistributing them is not ours to do. Without them the worker **refuses to
+start** and the log says what to do. That is deliberate: real inference is the
+default, and a tool that reports millimetres has no business inventing them.
+
+To demonstrate the stack with no checkpoint at all, set `DRY_RUN=1`. The dummy
+segmenter stands in, and every number it produces is labelled a dry run in the
+API response and behind a banner in the UI, because it is made up.
+
+### Device
+
+`DEVICE=auto` is the default: the worker asks torch at start-up whether a card
+is actually visible and falls back to CPU when it is not, so the same image
+runs on a laptop and on a GPU host unchanged.
+
+Only the worker can answer this — it is the only container with torch — so it
+publishes what it resolved to Redis and `/healthz` reports that under `worker`,
+alongside `workers_alive` from RQ's own registry. The API's `config.device` is
+its own setting and is not evidence about the GPU; an earlier build reported
+the API's value and said `cpu` while the worker was running on CUDA.
 
 On CPU expect **15–40 s per nodule**; on GPU about **1 s**. The CPU path is
 usable for a demonstration, not for routine reading.
@@ -65,6 +80,35 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
 The overlay changes only the worker — same code, CUDA base image, one GPU
 reserved. On Windows this works through Docker Desktop with the WSL2 backend.
 
+## Tests
+
+```bash
+pip install -r services/requirements-dev.txt
+python -m pytest tests/ -q
+```
+
+Two files, split by what they can prove:
+
+- `tests/test_services.py` — the modules. Storage round-trip, PNG rendering,
+  the worker task end to end against the dummy segmenter, device resolution,
+  the auto-prompt (including a volume containing nothing but chest wall, where
+  the correct answer is to refuse), the shape-plausibility checks, and a test
+  that imports every module in the project.
+- `tests/test_api_http.py` — the routes, over real HTTP, with Postgres swapped
+  for SQLite and Redis for fakeredis. Status codes, the upload cap, the
+  suggest→segment handoff, and `/healthz` reporting the worker's device rather
+  than its own. No Docker, no services, runs anywhere.
+
+The HTTP file skips cleanly if the dev requirements are not installed; the rest
+of the suite still runs.
+
+Two bugs in this project were invisible to module tests and found by the other
+kinds: a handler handed the browser `http://api:8000/...`, which only resolves
+inside the Docker network, and a docstring closed one line early in
+`src/report/sizing.py`, which parses but cannot import. `compileall` on
+`services/` alone missed the second one, which is why the import test walks
+`src/` too.
+
 ## Why the API never segments inline
 
 Inference takes seconds to a minute. A request that waits for it times out
@@ -73,10 +117,23 @@ behind any reverse proxy, and the browser gives up first. So:
 ```
 POST /api/cases                   201  {case_id}        upload an ROI (.npz)
 POST /api/cases/phantom           201  {case_id}        synthetic, for demos
+GET  /api/cases/{id}/suggest      200  {slice, box}     proposed prompt
+GET  /api/cases/{id}/slice/{z}.png                      windowed slice
 POST /api/cases/{id}/segment      202  {job_id}         body: {slice, box}
 GET  /api/jobs/{job_id}           200  {status, result} poll this
 GET  /api/jobs/{job_id}/overlay.png                     mask drawn on the slice
 ```
+
+Uploads are capped at `MAX_UPLOAD_MB` (64 by default) and the cap is enforced
+while reading the body, not after it is buffered. `CORS_ORIGINS` defaults to
+`*`, which is right for localhost and wrong for anything on a network.
+
+`/suggest` is what makes the UI one button. It is a **proposal, not a finding**:
+it assumes the nodule is near the middle of the crop, which holds for an ROI
+cut around a centroid and not for a whole scan, and it returns an `info` object
+saying how it arrived at the box so the proposal can be questioned rather than
+trusted. Components touching the edge of the crop are discarded, which is what
+keeps it off the chest wall.
 
 Load becomes latency instead of failure, and scaling becomes a flag.
 

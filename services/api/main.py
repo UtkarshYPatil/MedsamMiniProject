@@ -11,6 +11,8 @@ request that times out behind a proxy.
 This container has no torch and no model weights. It only moves bytes and
 rows; the worker does the computing.
 """
+import json
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 import numpy as np
@@ -24,13 +26,23 @@ from rq.job import Job as RQJob
 from sqlalchemy.orm import Session
 
 from services.api.db import Case, Job, SessionLocal, init_db
-from services.common import settings, store
+from services.common import autoprompt, settings, store
 
 TASK = "services.worker.tasks.segment_case"
 
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # on_event("startup") is deprecated in current FastAPI; lifespan is the
+    # supported hook and also runs on shutdown if that is ever needed.
+    settings.ensure_dirs()
+    init_db()
+    yield
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title="Nodule measurement assistant",
-    version="0.3.0",
+    version="0.4.0",
     description=(
         "Measures pulmonary nodules from a prompted 3D segmentation. "
         "It does not diagnose: every number is reported with the mask it came "
@@ -38,8 +50,13 @@ app = FastAPI(
         "radiologist. Research and education use only."
     ),
 )
+# "*" is fine for a research tool on localhost and wrong for anything exposed.
+# CORS_ORIGINS lets a deployment narrow it without a code change.
 app.add_middleware(
-    CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
+    CORSMiddleware,
+    allow_origins=settings.CORS_ORIGINS,
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
 )
 
 _redis = Redis.from_url(settings.REDIS_URL)
@@ -53,12 +70,6 @@ def get_db():
         yield db
     finally:
         db.close()
-
-
-@app.on_event("startup")
-def _startup():
-    settings.ensure_dirs()
-    init_db()
 
 
 # ------------------------------------------------------------------ schemas
@@ -80,12 +91,45 @@ class PhantomRequest(BaseModel):
 
 @app.get("/healthz")
 def healthz():
+    """
+    What the stack can actually do right now.
+
+    `config` is this container's own settings. `worker` is what the worker
+    reported about itself, which is the only trustworthy answer about the
+    device: this container has no torch and cannot tell a GPU from a toaster.
+    `workers_alive` comes from RQ's own registry, so a queue that is filling
+    up with nobody to drain it is visible instead of looking like slowness.
+    """
     try:
         _redis.ping()
         redis_ok = True
     except Exception:
         redis_ok = False
-    return {"ok": True, "redis": redis_ok, "workers": len(queue), "config": settings.summary()}
+
+    worker = None
+    try:
+        raw = _redis.get("worker:status")
+        if raw:
+            worker = json.loads(raw)
+    except Exception:
+        worker = None
+
+    try:
+        from rq import Worker
+        alive = Worker.count(connection=_redis, queue=queue)
+    except Exception:
+        alive = None
+
+    return {
+        "ok": True,
+        "redis": redis_ok,
+        "queued": len(queue),
+        "workers_alive": alive,
+        "worker": worker,
+        "config": settings.summary(),
+        # Kept so an older UI build does not break on a new API.
+        "workers": len(queue),
+    }
 
 
 # -------------------------------------------------------------------- cases
@@ -97,7 +141,22 @@ async def create_case(file: UploadFile = File(...), db: Session = Depends(get_db
 
     The files scripts/02_prepare_data.py writes are accepted as-is.
     """
-    raw = await file.read()
+    # Read with a cap instead of trusting the client: an unbounded read is
+    # how a service gets killed by one request.
+    limit = settings.MAX_UPLOAD_MB * 1024 * 1024
+    chunks, total = [], 0
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > limit:
+            raise HTTPException(
+                413, f"upload exceeds {settings.MAX_UPLOAD_MB} MB. A case is one "
+                     f"ROI crop (about 1 MB), not a whole series.")
+        chunks.append(chunk)
+    raw = b"".join(chunks)
+
     try:
         image, spacing = store.read_npz_upload(raw)
     except Exception as e:
@@ -143,6 +202,30 @@ def get_case(case_id: str, db: Session = Depends(get_db)):
     if not row:
         raise HTTPException(404, "no such case")
     return row.as_dict()
+
+
+@app.get("/api/cases/{case_id}/suggest")
+def suggest_prompt(case_id: str, db: Session = Depends(get_db)):
+    """
+    Propose a prompt box, so the common case is one button press.
+
+    A proposal, not a finding: it assumes the nodule is roughly central, which
+    holds for a centroid-cropped ROI and not for an arbitrary scan. The caller
+    can always override it, and `info` says how the box was arrived at so the
+    proposal can be questioned rather than trusted.
+    """
+    if not db.get(Case, case_id):
+        raise HTTPException(404, "no such case")
+    try:
+        vol, _ = store.load_case(case_id)
+    except FileNotFoundError:
+        raise HTTPException(404, "case record exists but its volume is missing")
+
+    z, box, info = autoprompt.suggest_box(vol)
+    if box is None:
+        z, box = autoprompt.centred_fallback(vol.shape)
+        return {"slice": z, "box": box, "source": "centred_fallback", "info": info}
+    return {"slice": z, "box": box, "source": "auto", "info": info}
 
 
 @app.get("/api/cases/{case_id}/slice/{z}.png")

@@ -14,11 +14,31 @@ ratings only 60% of the time, and every error was a reader-rated SOLID nodule
 whose attenuation looked subsolid. Attenuation and perceptual texture are not
 the same measurement. Until scripts/05_calibrate_density.py validates it on a
 class-balanced sample, consumers must show the HU statistics, not the label.
+
+SHAPE
+-----
+A nodule is roughly spherical. A mask that has latched onto the chest wall or
+pleura is a slab, and in the Phase 3 tool exactly that happened: a prompt placed
+near the edge of the crop produced a 3185 mm3 "nodule" of 17.4 x 30.8 mm with
+HIGH confidence and no flags, 43x the reference volume. Every geometric check
+passed, because the mask was large, solid and spanned many slices.
+
+Measured on the 137-nodule set, diameter_max / diameter_mean runs 1.02 to 1.55
+(median 1.16, p95 1.38) and that chest-wall mask sat at 1.77 -- no real nodule
+reached it. Elongation separates them; volume does not (14 real nodules exceed
+3185 mm3) and core attenuation does not (47 of 137 exceed 0 HU, one calcified
+nodule reaching +1271).
 """
 from dataclasses import dataclass, asdict, field
 
 from src.evaluate.metrics import measure, mean_diameter_mm
 from src.report.density import classify, solid_component_mask, hu_profile
+
+# Above the observed maximum of 1.55 on 137 nodules, below the 1.77 of the
+# known chest-wall failure. A heuristic on one dataset, so it lowers
+# confidence rather than refusing to report: a spiculated nodule, or one
+# merged with a vessel, could legitimately be this elongated.
+ELONGATION_MAX = 1.6
 
 
 @dataclass
@@ -110,6 +130,27 @@ def flag_quality(mask, m, density_class, prof=None):
 
     if prof.get("core_eroded") is False and m["n_voxels"] >= 20:
         drop("medium", "too small to erode - HU includes partial-volume rim")
+
+    # --- shape plausibility: is this nodule-shaped at all? ----------------
+    # The geometric checks above all passed on a chest-wall mask. These two
+    # ask whether the thing measured looks like a nodule rather than a slab.
+    mean_d = m.get("diameter_mean_mm") or 0.0
+    max_d = m.get("diameter_max_mm") or 0.0
+    if mean_d > 0:
+        elongation = max_d / mean_d
+        if elongation >= ELONGATION_MAX:
+            drop("low", f"slab-like shape (max/mean diameter {elongation:.2f}) - "
+                        f"check the mask is on a nodule and not the chest wall")
+
+    # A nodule contained in the crop does not run out of its in-plane edges.
+    # Z is excluded: a large nodule legitimately spans the full depth.
+    try:
+        if mask.ndim == 3 and (mask[:, 0, :].any() or mask[:, -1, :].any()
+                               or mask[:, :, 0].any() or mask[:, :, -1].any()):
+            drop("medium", "mask reaches the edge of the ROI - it may continue "
+                           "outside the crop")
+    except (AttributeError, IndexError, TypeError):
+        pass            # not an array-like mask; the other checks still apply
 
     return level, flags
 
