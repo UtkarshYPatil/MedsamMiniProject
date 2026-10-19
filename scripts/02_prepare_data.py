@@ -62,7 +62,7 @@ def main():
 
     manifest = []
     if man_path.exists() and not a.fresh:
-        manifest = json.loads(man_path.read_text())
+        manifest = json.loads(man_path.read_text(encoding="utf-8"))
     seen = {m["key"] for m in manifest}
 
     scans = pl.query(pl.Scan).all()[a.start:a.start + a.limit]
@@ -136,7 +136,7 @@ def main():
             manifest.append(d)
             seen.add(rec.key)
 
-    man_path.write_text(json.dumps(manifest, indent=2))
+    man_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     dt = time.time() - t0
     print(f"\n{len(manifest)} nodules in manifest  ({dt/max(1,len(scans)):.1f}s/scan)")

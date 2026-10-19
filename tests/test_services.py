@@ -187,14 +187,28 @@ def test_segment_case_reports_a_missing_case():
 
 # -------------------------------------------------------------- settings
 
-def test_settings_never_use_the_windows_research_paths():
+def test_settings_never_use_the_windows_research_paths(monkeypatch):
     """
     configs/config.yaml carries E:/MiniProject paths. A container that resolved
     them would fail at runtime, so the services must not inherit them.
+
+    The check is on the DEFAULT, with DATA_DIR unset. An earlier version
+    asserted the resolved path looked POSIX -- which tested the test's own
+    tmp_path fixture, and so failed on Windows, where tmp_path is C:\\...
+    while the container path it was meant to check was never involved.
     """
-    from services.common import settings
-    assert "E:/" not in str(settings.DATA_DIR)
-    assert str(settings.DATA_DIR).startswith("/") or str(settings.DATA_DIR)[1:3] != ":\\"
+    import importlib
+    monkeypatch.delenv("DATA_DIR", raising=False)
+    from services.common import settings as s
+    importlib.reload(s)
+    try:
+        assert str(s.DATA_DIR) in ("/data", "\\data"), \
+            f"the default data directory is {s.DATA_DIR}, not the container's /data"
+        assert "MiniProject" not in str(s.DATA_DIR)
+        assert "E:" not in str(s.DATA_DIR)
+    finally:
+        monkeypatch.undo()
+        importlib.reload(s)
 
 
 # ------------------------------------------------- dependency completeness
@@ -242,7 +256,7 @@ def test_worker_requirements_cover_src_imports():
               and m not in from_base_image
               and m not in not_on_service_path}
 
-    declared = (root / "services" / "requirements-worker.txt").read_text().lower()
+    declared = (root / "services" / "requirements-worker.txt").read_text(encoding="utf-8").lower()
     missing = sorted(m for m in needed
                      if dist.get(m, m).lower() not in declared)
 
@@ -343,10 +357,26 @@ def test_every_module_imports():
     import importlib
     import pathlib
 
+    # Streamlit pages are EXECUTED top to bottom by the framework, not
+    # imported. Importing one runs the whole page: it calls the API, and
+    # st.stop() -- which halts the script inside Streamlit's runtime -- is only
+    # a logged warning outside it, so execution continues past branches that
+    # were meant to be terminal and fails on a name that was never bound.
+    # That is a fact about Streamlit, not a defect in the page, so these are
+    # syntax-checked below instead.
+    ENTRY_POINTS = {"services/ui/app.py"}
+
     root = pathlib.Path(__file__).resolve().parents[1]
     skipped, failed = [], []
     for path in sorted(root.glob("src/**/*.py")) + sorted(root.glob("services/**/*.py")):
         if path.name == "__init__.py":
+            continue
+        if path.relative_to(root).as_posix() in ENTRY_POINTS:
+            src = path.read_text(encoding="utf-8")
+            try:
+                compile(src, str(path), "exec")
+            except SyntaxError as e:
+                failed.append((str(path), f"SyntaxError: {e}"))
             continue
         mod = ".".join(path.relative_to(root).with_suffix("").parts)
         try:
@@ -621,8 +651,44 @@ def test_the_worker_status_key_has_one_definition():
     for path in sorted(root.glob("services/**/*.py")):
         if path.name == "settings.py":
             continue                 # the one place it is allowed to be spelt
-        if f'"{literal}"' in path.read_text() or f"'{literal}'" in path.read_text():
+        text = path.read_text(encoding="utf-8")
+        if f'"{literal}"' in text or f"'{literal}'" in text:
             offenders.append(str(path.relative_to(root)))
 
     assert not offenders, \
         f"{literal!r} is hardcoded in {offenders}; use settings.WORKER_STATUS_KEY"
+
+
+def test_text_files_are_read_as_utf8():
+    """
+    read_text() with no encoding uses the LOCALE encoding, which is cp1252 on
+    a default Windows install and UTF-8 on Linux. Code written on Linux reads
+    fine there and crashes on Windows the moment a file contains an em dash or
+    an emoji -- which services/ui/app.py does, in its banner icons.
+
+    Three of this project's files were read that way. The fix is cheap and the
+    bug is invisible until someone runs it on the other platform, so the rule
+    is: every text read states its encoding.
+    """
+    import pathlib
+    import re
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    bad = []
+    pattern = re.compile(r"\.(read_text|write_text)\(|(?<![\w.])open\(")
+
+    for path in (sorted(root.glob("src/**/*.py")) + sorted(root.glob("services/**/*.py"))
+                 + sorted(root.glob("scripts/**/*.py")) + sorted(root.glob("tests/**/*.py"))):
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if not pattern.search(line):
+                continue
+            if "encoding=" in line or '"rb"' in line or "'rb'" in line \
+                    or '"wb"' in line or "'wb'" in line or "BytesIO" in line:
+                continue
+            # A call split across lines carries its encoding on a later line.
+            nxt = path.read_text(encoding="utf-8").splitlines()[n:n + 2]
+            if any("encoding=" in l for l in nxt):
+                continue
+            bad.append(f"{path.relative_to(root).as_posix()}:{n}: {line.strip()}")
+
+    assert not bad, "text I/O without an explicit encoding:\n  " + "\n  ".join(bad)

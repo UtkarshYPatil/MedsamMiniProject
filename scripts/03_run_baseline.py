@@ -46,7 +46,7 @@ def main():
     if not man_path.exists():
         raise SystemExit(f"no manifest at {man_path} -- run scripts/02_prepare_data.py first")
 
-    manifest = json.loads(man_path.read_text())
+    manifest = json.loads(man_path.read_text(encoding="utf-8"))
     if a.limit:
         manifest = manifest[: a.limit]
     print(f"{len(manifest)} nodules")

@@ -106,7 +106,7 @@ def main():
     figdir.mkdir(parents=True, exist_ok=True)
     maskdir.mkdir(parents=True, exist_ok=True)
 
-    manifest = json.loads((proc / "manifest.json").read_text())
+    manifest = json.loads((proc / "manifest.json").read_text(encoding="utf-8"))
     by_key = {m["key"]: m for m in manifest}
 
     keys = pick_keys(manifest, a.n, a.keys, outdir)

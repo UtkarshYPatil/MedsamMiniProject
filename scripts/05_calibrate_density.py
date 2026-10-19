@@ -33,7 +33,7 @@ CLASSES = ["solid", "part_solid", "ground_glass"]
 
 def load_features():
     proc = Path(CFG.paths.processed)
-    man = json.loads((proc / "manifest.json").read_text())
+    man = json.loads((proc / "manifest.json").read_text(encoding="utf-8"))
     rows = []
     for m in man:
         d = np.load(proc / m["file"])
@@ -144,7 +144,8 @@ def main():
     plt.savefig(p, dpi=130, bbox_inches="tight")
     print(f"\nwrote {p}")
 
-    (out / "density_features.json").write_text(json.dumps(rows, indent=2, default=float))
+    (out / "density_features.json").write_text(
+        json.dumps(rows, indent=2, default=float), encoding="utf-8")
     print(f"wrote {out/'density_features.json'}")
 
 

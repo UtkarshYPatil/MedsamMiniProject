@@ -12,7 +12,7 @@ def _ns(d):
 
 def load(path=None):
     path = Path(path) if path else ROOT / "configs" / "config.yaml"
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         return _ns(yaml.safe_load(f))
 
 

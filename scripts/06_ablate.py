@@ -56,7 +56,7 @@ def main():
     a = ap.parse_args()
 
     proc = Path(CFG.paths.processed)
-    manifest = json.loads((proc / "manifest.json").read_text())
+    manifest = json.loads((proc / "manifest.json").read_text(encoding="utf-8"))
     if a.limit:
         manifest = manifest[: a.limit]
 

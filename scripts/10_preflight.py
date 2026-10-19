@@ -88,7 +88,7 @@ def check_build_context():
     import re
     missing = []
     for df in sorted((ROOT / "docker").glob("*.Dockerfile")):
-        text = df.read_text()
+        text = df.read_text(encoding="utf-8")
         for m in re.finditer(r"^COPY\s+(?!--from)(.+)$", text, re.M):
             parts = [p for p in m.group(1).split() if not p.startswith("--")]
             for src in parts[:-1]:
@@ -107,7 +107,7 @@ def check_checkpoint():
     dry = os.environ.get("DRY_RUN", "").strip().lower() in ("1", "true", "yes", "on")
     env_file = ROOT / ".env"
     if not dry and env_file.exists():
-        for line in env_file.read_text().splitlines():
+        for line in env_file.read_text(encoding="utf-8").splitlines():
             if line.strip().startswith("DRY_RUN="):
                 dry = line.split("=", 1)[1].strip().lower() in ("1", "true", "yes", "on")
 

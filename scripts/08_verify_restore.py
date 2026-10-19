@@ -37,10 +37,10 @@ def main():
     if not res_path.exists():
         raise SystemExit(f"no {res_path} - nothing to compare against")
 
-    manifest = json.loads(man_path.read_text())
+    manifest = json.loads(man_path.read_text(encoding="utf-8"))
     new = {m["key"] for m in manifest}
 
-    rows = list(csv.DictReader(res_path.open()))
+    rows = list(csv.DictReader(res_path.open(encoding="utf-8", newline="")))
     old = {r["key"] for r in rows}
     old_dice = {r["key"]: float(r["dice"]) for r in rows if r.get("dice")}
 

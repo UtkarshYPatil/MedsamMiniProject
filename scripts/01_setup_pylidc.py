@@ -110,10 +110,11 @@ def find_xml(near: Path):
 def write_config(dicom_root: Path):
     cfg = config_path()
     cfg.parent.mkdir(parents=True, exist_ok=True)
-    cfg.write_text(f"[dicom]\npath = {dicom_root.as_posix()}\nwarn = True\n")
+    cfg.write_text(f"[dicom]\npath = {dicom_root.as_posix()}\nwarn = True\n",
+                   encoding="utf-8")
     print(f"\nwrote {cfg}")
     print("-" * 56)
-    print(cfg.read_text().rstrip())
+    print(cfg.read_text(encoding="utf-8").rstrip())
     print("-" * 56)
     return cfg
 

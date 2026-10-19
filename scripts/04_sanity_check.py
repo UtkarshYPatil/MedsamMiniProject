@@ -32,7 +32,7 @@ def main():
     a = ap.parse_args()
 
     proc = Path(CFG.paths.processed)
-    manifest = json.loads((proc / "manifest.json").read_text())
+    manifest = json.loads((proc / "manifest.json").read_text(encoding="utf-8"))
     if not manifest:
         raise SystemExit("manifest is empty -- run scripts/02_prepare_data.py")
 
