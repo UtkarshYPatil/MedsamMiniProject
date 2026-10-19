@@ -1,0 +1,38 @@
+# Keep the build context small. The CT dataset lives outside the repo
+# (E:/MiniProject/DATASET_ct), but these are inside it and would otherwise be
+# sent to the Docker daemon on every build.
+.git/
+.github/
+
+checkpoints/
+external/
+data/
+processed/
+DATASET_ct/
+LIDC-XML-only/
+
+# Generated artifacts. The figures are committed evidence, not build inputs.
+outputs/masks/
+outputs/figures/
+outputs/*.png
+outputs/*.json
+
+notebooks/
+docs/
+*.md
+!README.md
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+.vscode/
+.idea/
+.DS_Store
+
+*.pptx
+*.docx
+*.bundle

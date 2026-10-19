@@ -96,11 +96,35 @@ src/report/density.py   HU profile + provisional density class
 src/report/sizing.py    measurement summary + confidence flags
 scripts/                00 verify → 01 setup → 02 prepare → 04 sanity
                         → 03 baseline → 05 calibrate
-app/app.py              Streamlit tool
-tests/                  28 unit tests
+app/app.py              Streamlit tool (single process, local)
+services/               Phase 3 service stack
+  common/               env settings, case storage, PNG rendering, phantom
+  api/                  FastAPI: upload, enqueue, poll, overlay
+  worker/               RQ worker; the only process that loads the model
+  ui/                   Streamlit client, talks only to the API
+docker/                 one Dockerfile per service (+ a CUDA worker variant)
+docker-compose.yml      full stack, CPU, runs anywhere
+docker-compose.gpu.yml  overlay: swaps the worker onto CUDA
+tests/                  43 unit tests (28 research + 15 service)
 docs/hld.md             high-level design
 docs/model_card.md      model version, metrics, limitations
+docs/phase3_deployment.md  running, scaling and hosting the stack
 ```
+
+## Run the full stack
+
+```bash
+cp .env.example .env
+docker compose up --build
+# UI  http://localhost:8501     API  http://localhost:8000/docs
+```
+
+Comes up with **no dataset and no GPU** — `DRY_RUN=1` substitutes the dummy
+segmenter and the UI says so. Create a phantom case in the sidebar and press
+Segment to exercise the whole path. For real inference, put
+`MedSAM2_CTLesion.pt` in `checkpoints/` and set `DRY_RUN=0`. For GPU, add
+`-f docker-compose.gpu.yml`. Details and hosting notes in
+[`docs/phase3_deployment.md`](docs/phase3_deployment.md).
 
 ## Known limitations
 

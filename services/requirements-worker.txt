@@ -1,0 +1,11 @@
+# Worker container. torch comes from the base image (CPU wheels in
+# worker.Dockerfile, CUDA in worker.gpu.Dockerfile), and sam2 is installed
+# from the MedSAM2 repo at build time.
+#
+# src/ itself needs only numpy and pyyaml -- the measurement and density code
+# is pure numpy, which is why this list is short.
+numpy>=1.26
+pyyaml>=6.0
+redis>=5.0
+rq>=1.16
+pillow>=10.4
