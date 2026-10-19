@@ -195,3 +195,58 @@ def test_settings_never_use_the_windows_research_paths():
     from services.common import settings
     assert "E:/" not in str(settings.DATA_DIR)
     assert str(settings.DATA_DIR).startswith("/") or str(settings.DATA_DIR)[1:3] != ":\\"
+
+
+# ------------------------------------------------- dependency completeness
+
+def test_worker_requirements_cover_src_imports():
+    """
+    Every third-party module src/ imports must be declared for the worker.
+
+    This test exists because it was not. scikit-image and scipy are imported
+    *inside* functions (metrics.max_diameter_mm, density.solid_component_mask),
+    so a grep for imports at the start of a line missed them, the worker image
+    shipped without them, and it died with ModuleNotFoundError on the first
+    real job -- while the test suite passed, because both happen to be
+    installed in a development environment.
+
+    A lazy import is still a dependency. This checks the declaration, not the
+    environment, so it fails on the machine that writes the Dockerfile rather
+    than on the machine that runs it.
+    """
+    import re
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+
+    # Provided by the base image or installed separately in the Dockerfile.
+    from_base_image = {"torch", "torchvision", "sam2"}
+    # Not reachable from the segmentation path: pylidc is dataset preparation,
+    # medpy is only metrics.hd95, which measure() does not call.
+    not_on_service_path = {"pylidc", "medpy"}
+    # import name -> distribution name on PyPI
+    dist = {"skimage": "scikit-image", "yaml": "pyyaml", "PIL": "pillow",
+            "cv2": "opencv-python", "sklearn": "scikit-learn"}
+
+    found = set()
+    for py in (root / "src").rglob("*.py"):
+        for line in py.read_text(encoding="utf-8").splitlines():
+            m = re.match(r"\s*(?:import|from)\s+([A-Za-z_][\w.]*)", line)
+            if m:
+                found.add(m.group(1).split(".")[0])
+
+    needed = {m for m in found
+              if m not in sys.stdlib_module_names
+              and m != "src"
+              and m not in from_base_image
+              and m not in not_on_service_path}
+
+    declared = (root / "services" / "requirements-worker.txt").read_text().lower()
+    missing = sorted(m for m in needed
+                     if dist.get(m, m).lower() not in declared)
+
+    assert not missing, (
+        f"src/ imports {missing} but services/requirements-worker.txt does not "
+        f"declare them -- the worker container will fail at runtime. "
+        f"Distribution names: {[dist.get(m, m) for m in missing]}")

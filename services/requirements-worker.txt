@@ -2,9 +2,23 @@
 # worker.Dockerfile, CUDA in worker.gpu.Dockerfile), and sam2 is installed
 # from the MedSAM2 repo at build time.
 #
-# src/ itself needs only numpy and pyyaml -- the measurement and density code
-# is pure numpy, which is why this list is short.
+# Everything src/ reaches on the segmentation path, INCLUDING imports made
+# inside functions -- which is how scikit-image and scipy were missed the first
+# time and crashed the worker at runtime:
+#
+#   metrics.max_diameter_mm   -> from skimage.measure import label, regionprops
+#   density.solid_component   -> from scipy.ndimage import binary_erosion
+#   medsam2.largest_component -> from skimage import measure
+#
+# tests/test_services.py::test_worker_requirements_cover_src_imports now checks
+# this list against every import in src/, so the next lazy import cannot slip
+# through the same way.
+#
+# medpy is deliberately absent: it is only reached by metrics.hd95, which is an
+# evaluation metric. measure() does not call it, so the worker never needs it.
 numpy>=1.26
+scipy>=1.11
+scikit-image>=0.22
 pyyaml>=6.0
 redis>=5.0
 rq>=1.16
