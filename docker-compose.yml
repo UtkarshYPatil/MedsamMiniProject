@@ -54,6 +54,7 @@ services:
     restart: unless-stopped
 
   api:
+    image: ${REGISTRY:-ghcr.io/utkarshypatil}/nodule-api:${TAG:-latest}
     build:
       context: .
       dockerfile: docker/api.Dockerfile
@@ -76,6 +77,7 @@ services:
     restart: unless-stopped
 
   worker:
+    image: ${REGISTRY:-ghcr.io/utkarshypatil}/nodule-worker:${TAG:-latest}
     build:
       context: .
       dockerfile: docker/worker.Dockerfile
@@ -92,6 +94,7 @@ services:
     #   docker compose up --scale worker=4
 
   ui:
+    image: ${REGISTRY:-ghcr.io/utkarshypatil}/nodule-ui:${TAG:-latest}
     build:
       context: .
       dockerfile: docker/ui.Dockerfile

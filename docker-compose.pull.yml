@@ -1,0 +1,117 @@
+# Run the stack WITHOUT the repository. This file is the only thing you need
+# from it, plus the model checkpoint.
+#
+# It pulls prebuilt images instead of building them, so there is no clone, no
+# Python and no ten-minute build.
+#
+#   1. Put MedSAM2_CTLesion.pt in a ./checkpoints folder next to this file.
+#      Get it from https://huggingface.co/wanglab/MedSAM2 (file:
+#      MedSAM2_CTLesion.pt, 156 MB). It is NOT in the images: the weights are
+#      research-and-education-use only, so they are not ours to redistribute.
+#
+#   2. docker compose -f docker-compose.pull.yml up
+#
+#   3. Open http://localhost:8501
+#
+# No checkpoint, just want to see it run? Set DRY_RUN=1. A dummy segmenter
+# stands in and every number it produces is labelled as invented, in the API
+# response and behind a banner in the UI. It demonstrates the plumbing, nothing
+# more.
+#
+# GPU: set WORKER_TAG=latest-gpu and DEVICE=cuda, and uncomment the deploy
+# block under worker. Needs the NVIDIA Container Toolkit on the host. Without
+# it the CPU path works and takes 15-40 s per nodule instead of about 1 s.
+#
+# RESEARCH AND EDUCATION ONLY. Not a medical device. It measures; it does not
+# diagnose, and every interpretation stays with the radiologist.
+
+name: nodule-assistant
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-nodule}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nodule}
+      POSTGRES_DB: ${POSTGRES_DB:-nodule}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nodule}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    image: ${REGISTRY:-ghcr.io/utkarshypatil}/nodule-api:${TAG:-latest}
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-nodule}:${POSTGRES_PASSWORD:-nodule}@db:5432/${POSTGRES_DB:-nodule}
+      REDIS_URL: redis://redis:6379/0
+      DATA_DIR: /data
+      QUEUE_NAME: segmentation
+      DEVICE: ${DEVICE:-auto}
+      DRY_RUN: ${DRY_RUN:-0}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-64}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - data:/data
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    restart: unless-stopped
+
+  worker:
+    # WORKER_TAG=latest-gpu selects the CUDA build of this same image.
+    image: ${REGISTRY:-ghcr.io/utkarshypatil}/nodule-worker:${WORKER_TAG:-latest}
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      DATA_DIR: /data
+      QUEUE_NAME: segmentation
+      CHECKPOINT: /app/checkpoints/MedSAM2_CTLesion.pt
+      MODEL_CFG: configs/sam2.1_hiera_t512.yaml
+      DEVICE: ${DEVICE:-auto}
+      DRY_RUN: ${DRY_RUN:-0}
+      JOB_TIMEOUT: ${JOB_TIMEOUT:-600}
+    volumes:
+      - data:/data
+      # Mounted from the host, never baked in. Read-only: the worker has no
+      # business writing to the weights.
+      - ./checkpoints:/app/checkpoints:ro
+    depends_on:
+      redis: {condition: service_healthy}
+    restart: unless-stopped
+    # Uncomment for GPU, with WORKER_TAG=latest-gpu:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  ui:
+    image: ${REGISTRY:-ghcr.io/utkarshypatil}/nodule-ui:${TAG:-latest}
+    environment:
+      API_URL: http://api:8000
+    ports:
+      - "${UI_PORT:-8501}:8501"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  data:

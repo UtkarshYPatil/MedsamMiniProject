@@ -692,3 +692,58 @@ def test_text_files_are_read_as_utf8():
             bad.append(f"{path.relative_to(root).as_posix()}:{n}: {line.strip()}")
 
     assert not bad, "text I/O without an explicit encoding:\n  " + "\n  ".join(bad)
+
+
+# ------------------------------------------------------- distribution shape
+
+def test_pull_compose_builds_nothing_and_bakes_in_no_weights():
+    """
+    docker-compose.pull.yml is the file a recipient gets on its own. It must
+    pull rather than build (they have no repository to build from), and the
+    checkpoint must arrive as a read-only host mount.
+
+    The licence is the reason: MedSAM2's weights are research-and-education-use
+    only, so an image carrying them is not ours to publish. That constraint is
+    easy to break by adding a COPY and never noticing.
+    """
+    import pathlib
+    import yaml
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    path = root / "docker-compose.pull.yml"
+    assert path.exists(), "the standalone compose file is missing"
+
+    spec = yaml.safe_load(path.read_text(encoding="utf-8"))
+    services = spec["services"]
+
+    for name, svc in services.items():
+        assert "build" not in svc, \
+            f"{name} has a build context; a recipient has no repository to build from"
+        assert "image" in svc, f"{name} has no image to pull"
+
+    worker = services["worker"]
+    mounts = [m for m in worker.get("volumes", []) if "checkpoints" in m]
+    assert mounts, "the worker has no checkpoint mount, so it can never find the weights"
+    assert all(m.endswith(":ro") for m in mounts), \
+        f"the checkpoint mount must be read-only: {mounts}"
+
+    # Every service the stack needs must be present, or it comes up broken.
+    assert set(services) >= {"db", "redis", "api", "worker", "ui"}
+
+
+def test_no_dockerfile_copies_the_weights():
+    """A COPY of the checkpoint would put the weights inside a published image."""
+    import pathlib
+    import re
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    offenders = []
+    for df in sorted((root / "docker").glob("*.Dockerfile")):
+        for n, line in enumerate(df.read_text(encoding="utf-8").splitlines(), 1):
+            if re.match(r"^\s*(COPY|ADD)\b", line) and re.search(
+                    r"checkpoints?|\.pt\b|MedSAM2", line, re.I):
+                offenders.append(f"{df.name}:{n}: {line.strip()}")
+
+    assert not offenders, \
+        "weights would be baked into an image (they are not ours to redistribute):\n  " \
+        + "\n  ".join(offenders)

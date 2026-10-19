@@ -120,6 +120,67 @@ inside the Docker network, and a docstring closed one line early in
 `services/` alone missed the second one, which is why the import test walks
 `src/` too.
 
+## Sharing it
+
+Someone else can run the stack without the repository, without Python and
+without a build. They need Docker, one file, and the checkpoint.
+
+**The weights are never published.** `MedSAM2_CTLesion.pt` is mounted from the
+host at runtime and is absent from every image, because MedSAM2's weights are
+research-and-education-use only. `scripts/publish_images.ps1` greps each built
+image for them and refuses to push if it finds any.
+
+### Publish once
+
+```powershell
+.\scripts\publish_images.ps1              # GHCR, tag "latest"
+.\scripts\publish_images.ps1 -Tag v1.0    # a fixed version
+.\scripts\publish_images.ps1 -Gpu         # also the CUDA worker
+```
+
+GHCR packages are **private by default**. To let anyone pull without logging
+in, set each to public at `https://github.com/UtkarshYPatil?tab=packages`.
+Otherwise they need `docker login ghcr.io` with a read:packages token.
+
+### What they do
+
+1. Put `MedSAM2_CTLesion.pt` in a `./checkpoints` folder beside the compose
+   file — from <https://huggingface.co/wanglab/MedSAM2>, 156 MB.
+2. `docker compose -f docker-compose.pull.yml up`
+3. Open <http://localhost:8501>
+
+With no checkpoint at all, `DRY_RUN=1` brings the stack up on a dummy
+segmenter so the plumbing can be seen. Every number it produces is labelled
+invented, in the API response and behind a banner in the UI.
+
+For GPU: `WORKER_TAG=latest-gpu`, `DEVICE=cuda`, and uncomment the `deploy`
+block under `worker`.
+
+### Choosing how to share
+
+| | recipient needs | size to move | when |
+|---|---|---|---|
+| **Registry** | Docker + 1 file + checkpoint | they pull ~3 GB | showing it to someone |
+| **`docker save`** | Docker + checkpoint | you move 4–6 GB | they are offline |
+| **The repo** | Docker + Python + checkpoint | a clone | they will change the code |
+
+A tarball, if you need one:
+
+```powershell
+docker save ghcr.io/utkarshypatil/nodule-api:latest `
+            ghcr.io/utkarshypatil/nodule-worker:latest `
+            ghcr.io/utkarshypatil/nodule-ui:latest `
+            postgres:16-alpine redis:7-alpine -o nodule-stack.tar
+# they run: docker load -i nodule-stack.tar
+```
+
+### One caveat
+
+Images are built for the architecture you build on. An image built on your
+x86_64 Windows machine will not run natively on an Apple Silicon Mac — Docker
+emulates it, slowly, and torch sometimes does not survive the translation. If
+the recipient is on an M-series Mac, have them use the repo and build locally.
+
 ## Why the API never segments inline
 
 Inference takes seconds to a minute. A request that waits for it times out

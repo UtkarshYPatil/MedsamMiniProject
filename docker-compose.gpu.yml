@@ -9,6 +9,7 @@
 
 services:
   worker:
+    image: ${REGISTRY:-ghcr.io/utkarshypatil}/nodule-worker:${TAG:-latest}-gpu
     build:
       dockerfile: docker/worker.gpu.Dockerfile
     environment:
