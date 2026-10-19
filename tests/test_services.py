@@ -602,3 +602,27 @@ def test_publish_status_never_raises_without_redis(monkeypatch):
         monkeypatch.undo()
         importlib.reload(s)
         importlib.reload(tasks)
+
+
+def test_the_worker_status_key_has_one_definition():
+    """
+    The key is a contract between two containers. Hardcoded at both ends, a
+    rename stops the API from ever seeing a worker again and raises nothing.
+    """
+    import pathlib
+    from services.common import settings
+    from services.worker import tasks
+
+    assert tasks.STATUS_KEY == settings.WORKER_STATUS_KEY
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    literal = settings.WORKER_STATUS_KEY
+    offenders = []
+    for path in sorted(root.glob("services/**/*.py")):
+        if path.name == "settings.py":
+            continue                 # the one place it is allowed to be spelt
+        if f'"{literal}"' in path.read_text() or f"'{literal}'" in path.read_text():
+            offenders.append(str(path.relative_to(root)))
+
+    assert not offenders, \
+        f"{literal!r} is hardcoded in {offenders}; use settings.WORKER_STATUS_KEY"

@@ -35,6 +35,12 @@ DATABASE_URL = os.environ.get(
 QUEUE_NAME = os.environ.get("QUEUE_NAME", "segmentation")
 API_URL = os.environ.get("API_URL", "http://api:8000")
 
+# Where the worker publishes what it resolved (device, checkpoint) and the API
+# reads it for /healthz. It lives here because it is a contract between two
+# containers: hardcoding the string at both ends means a rename silently stops
+# the API from ever seeing a worker again, with no error anywhere.
+WORKER_STATUS_KEY = "worker:status"
+
 # Comma-separated origins, or "*". Fine as "*" on localhost; narrow it for
 # anything reachable from a network.
 CORS_ORIGINS = [o.strip() for o in

@@ -27,6 +27,17 @@ cp .env.example .env          # Windows: copy .env.example .env
 docker compose up --build
 ```
 
+Before the first build, check that it will work:
+
+```bash
+python scripts/10_preflight.py          # add --gpu for the GPU overlay
+```
+
+It verifies the Docker daemon, both compose files, every Dockerfile `COPY`
+source, the ports, free disk, and the checkpoint -- and for `--gpu`, that the
+host driver is actually reachable from a container. Exit 0 means go. Every
+check in it corresponds to something that has failed here for real.
+
 | | |
 |---|---|
 | UI | http://localhost:8501 |

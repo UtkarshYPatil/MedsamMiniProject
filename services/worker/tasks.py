@@ -28,7 +28,7 @@ _device = None
 # container with torch. The API used to report its own DEVICE setting, which
 # said "cpu" while the worker ran on cuda. Reporting a value the reporting
 # process cannot verify is how a dashboard ends up lying.
-STATUS_KEY = "worker:status"
+STATUS_KEY = settings.WORKER_STATUS_KEY
 
 
 def checkpoint_present() -> bool:

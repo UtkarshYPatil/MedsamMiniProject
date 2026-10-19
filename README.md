@@ -122,6 +122,7 @@ docs/phase3_deployment.md  running, scaling and hosting the stack
 
 ```bash
 cp .env.example .env
+python scripts/10_preflight.py     # catches the usual failures first
 docker compose up --build
 # UI  http://localhost:8501     API  http://localhost:8000/docs
 ```

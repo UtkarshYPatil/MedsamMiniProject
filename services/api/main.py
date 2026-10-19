@@ -108,7 +108,7 @@ def healthz():
 
     worker = None
     try:
-        raw = _redis.get("worker:status")
+        raw = _redis.get(settings.WORKER_STATUS_KEY)
         if raw:
             worker = json.loads(raw)
     except Exception:
