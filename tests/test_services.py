@@ -250,3 +250,81 @@ def test_worker_requirements_cover_src_imports():
         f"src/ imports {missing} but services/requirements-worker.txt does not "
         f"declare them -- the worker container will fail at runtime. "
         f"Distribution names: {[dist.get(m, m) for m in missing]}")
+
+
+# ------------------------------------------------------------ device choice
+
+def _fresh_tasks(monkeypatch, device):
+    """Re-import the worker with DEVICE set, clearing the cached resolution."""
+    import importlib
+    monkeypatch.setenv("DEVICE", device)
+    from services.common import settings as s
+    importlib.reload(s)
+    from services.worker import tasks as t
+    importlib.reload(t)
+    t._device = None
+    return t
+
+
+def test_explicit_cpu_is_honoured(monkeypatch):
+    assert _fresh_tasks(monkeypatch, "cpu").resolve_device() == "cpu"
+
+
+def test_explicit_cuda_is_honoured_even_without_a_gpu(monkeypatch):
+    """
+    An explicit request is not second-guessed. Someone who asked for the GPU
+    should get a loud failure, not a silent 30x slowdown.
+    """
+    assert _fresh_tasks(monkeypatch, "cuda").resolve_device() == "cuda"
+
+
+def test_auto_falls_back_to_cpu_when_no_gpu_is_visible(monkeypatch):
+    t = _fresh_tasks(monkeypatch, "auto")
+
+    import sys
+    import types
+    fake = types.ModuleType("torch")
+    fake.cuda = types.SimpleNamespace(is_available=lambda: False, device_count=lambda: 0)
+    monkeypatch.setitem(sys.modules, "torch", fake)
+
+    assert t.resolve_device() == "cpu"
+    assert "requested auto" in t.device_detail()
+
+
+def test_auto_picks_cuda_when_a_gpu_is_visible(monkeypatch):
+    t = _fresh_tasks(monkeypatch, "auto")
+
+    import sys
+    import types
+    fake = types.ModuleType("torch")
+    fake.cuda = types.SimpleNamespace(
+        is_available=lambda: True, device_count=lambda: 1,
+        get_device_name=lambda i: "NVIDIA GeForce RTX 4060 Laptop GPU")
+    monkeypatch.setitem(sys.modules, "torch", fake)
+
+    assert t.resolve_device() == "cuda"
+    assert "RTX 4060" in t.device_detail()
+
+
+def test_auto_survives_torch_being_absent(monkeypatch):
+    """The api and ui containers have no torch; importing must not explode."""
+    t = _fresh_tasks(monkeypatch, "auto")
+
+    import builtins
+    real_import = builtins.__import__
+
+    def no_torch(name, *a, **k):
+        if name == "torch":
+            raise ImportError("no torch here")
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", no_torch)
+    assert t.resolve_device() == "cpu"
+
+
+def test_resolution_is_cached(monkeypatch):
+    t = _fresh_tasks(monkeypatch, "cpu")
+    assert t.resolve_device() == "cpu"
+    t2 = _fresh_tasks(monkeypatch, "cpu")
+    t2._device = "cuda"                 # pretend it already resolved
+    assert t2.resolve_device() == "cuda", "a resolved device must not be recomputed"

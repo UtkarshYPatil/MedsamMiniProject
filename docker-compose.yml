@@ -75,7 +75,7 @@ services:
       dockerfile: docker/worker.Dockerfile
     environment:
       <<: *worker-env
-      DEVICE: cpu
+      DEVICE: ${DEVICE:-auto}
     volumes:
       - data:/data
       - ./checkpoints:/app/checkpoints:ro

@@ -38,7 +38,16 @@ API_URL = os.environ.get("API_URL", "http://api:8000")
 # ------------------------------------------------------------------- model
 CHECKPOINT = os.environ.get("CHECKPOINT", "checkpoints/MedSAM2_CTLesion.pt")
 MODEL_CFG = os.environ.get("MODEL_CFG", "configs/sam2.1_hiera_t512.yaml")
-DEVICE = os.environ.get("DEVICE", "cpu")
+
+# "auto" (the default), "cuda" or "cpu".
+#
+# auto asks torch at worker start-up whether a usable GPU is visible and falls
+# back to CPU when it is not, so the same image runs on a laptop without a card
+# and on a GPU host without changing anything. Only the worker can resolve this
+# -- the api and ui containers have no torch, which is deliberate -- so
+# services.worker.tasks.resolve_device() does the work and reports what it
+# picked in every job result.
+DEVICE = os.environ.get("DEVICE", "auto").strip().lower()
 
 # DRY_RUN swaps in DummySegmenter: no weights, no GPU, meaningless masks.
 # It exists so the whole stack can be brought up and demonstrated on a machine

@@ -17,15 +17,60 @@ import numpy as np
 from services.common import settings, store
 
 _segmenter = None
+_device = None
+
+
+def resolve_device() -> str:
+    """
+    Decide once what to run on, and remember it.
+
+    DEVICE=auto asks torch whether a usable GPU is actually visible rather than
+    whether CUDA was compiled in -- a CUDA build with no card, or a container
+    started without --gpus, both report False and fall back to CPU instead of
+    dying at the first forward pass.
+
+    An explicit DEVICE=cuda is honoured as written: if someone asked for the
+    GPU and it is not there, that is worth failing loudly over rather than
+    silently running 30x slower.
+    """
+    global _device
+    if _device is not None:
+        return _device
+
+    want = settings.DEVICE
+    if want in ("cpu", "cuda"):
+        _device = want
+        return _device
+
+    _device = "cpu"
+    try:
+        import torch
+        if torch.cuda.is_available() and torch.cuda.device_count() > 0:
+            _device = "cuda"
+    except Exception:
+        pass            # no torch, no driver, no CUDA build -- all mean cpu
+    return _device
+
+
+def device_detail() -> str:
+    """A human-readable note about what resolve_device() settled on."""
+    dev = resolve_device()
+    if dev != "cuda":
+        return f"{dev} (requested {settings.DEVICE})"
+    try:
+        import torch
+        return f"cuda: {torch.cuda.get_device_name(0)}"
+    except Exception:
+        return "cuda"
 
 
 def get_segmenter():
-    """Lazy, per-process. RQ forks per job, so this warms once per worker."""
+    """Lazy, per-process. Warms once per worker, not once per job."""
     global _segmenter
     if _segmenter is None:
         from src.models.medsam2 import build
         _segmenter = build(settings.CHECKPOINT, settings.MODEL_CFG,
-                           settings.DEVICE, dry_run=settings.DRY_RUN).load()
+                           resolve_device(), dry_run=settings.DRY_RUN).load()
     return _segmenter
 
 
@@ -55,7 +100,7 @@ def segment_case(case_id: str, prompt_z: int, box, propagate: bool = True) -> di
         return {
             "empty": True,
             "seconds": round(dt, 3),
-            "device": settings.DEVICE,
+            "device": resolve_device(),
             "dry_run": settings.DRY_RUN,
             "message": "the model returned an empty mask for this prompt",
         }
@@ -67,7 +112,7 @@ def segment_case(case_id: str, prompt_z: int, box, propagate: bool = True) -> di
     return {
         "empty": False,
         "seconds": round(dt, 3),
-        "device": settings.DEVICE,
+        "device": resolve_device(),
         "dry_run": settings.DRY_RUN,
         "slices_covered": n_slices,
         "prompt_slice": int(prompt_z),

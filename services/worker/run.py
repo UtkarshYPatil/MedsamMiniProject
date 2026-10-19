@@ -32,12 +32,21 @@ def main():
     conn.ping()
     log.info("connected to %s, queue %r", settings.REDIS_URL, settings.QUEUE_NAME)
 
+    from services.worker.tasks import device_detail, resolve_device
+    dev = resolve_device()
+    log.info("device: %s", device_detail())
+    if settings.DEVICE == "auto" and dev == "cpu":
+        log.warning("no usable GPU visible - falling back to CPU. Inference will "
+                    "take 15-40 s per nodule instead of about 1 s. For GPU, add "
+                    "-f docker-compose.gpu.yml and check the host with: "
+                    "docker run --rm --gpus all nvidia/cuda:12.8.0-base-ubuntu24.04 nvidia-smi")
+
     if not settings.DRY_RUN:
         # Pay the model load now, at boot, rather than on the first user's job.
         from services.worker.tasks import get_segmenter
         log.info("loading the model...")
         get_segmenter()
-        log.info("model ready on %s", settings.DEVICE)
+        log.info("model ready on %s", dev)
 
     # SimpleWorker runs jobs in-process instead of forking. Forking per job
     # would discard the loaded model every time, which on CPU costs more than

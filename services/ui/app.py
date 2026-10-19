@@ -37,6 +37,24 @@ def api(method, path, **kw):
     return r.json() if r.headers.get("content-type", "").startswith("application/json") else r
 
 
+def api_image(path, timeout=60):
+    """
+    Fetch an image and return its bytes.
+
+    Handing st.image() a URL does not work here: Streamlit embeds the URL in
+    the page and the BROWSER fetches it, but API_URL is http://api:8000 --
+    a name that only resolves inside the Docker network. The browser cannot
+    see it and renders a broken image.
+
+    Fetching server-side and passing bytes keeps the request inside the
+    network, so it also works unchanged behind a tunnel or a reverse proxy
+    where the browser has no route to the API at all.
+    """
+    r = requests.get(f"{API}{path}", timeout=timeout)
+    r.raise_for_status()
+    return r.content
+
+
 st.title("Nodule measurement assistant")
 st.caption(
     "Measurements only - not a diagnosis and not a clinical recommendation. "
@@ -114,7 +132,7 @@ left, right = st.columns([3, 2], gap="large")
 with left:
     st.subheader("Image")
     z = st.slider("Slice", 0, D - 1, D // 2)
-    st.image(f"{API}/api/cases/{case_id}/slice/{z}.png",
+    st.image(api_image(f"/api/cases/{case_id}/slice/{z}.png"),
              width="stretch", caption=f"slice {z} of {D - 1}")
 
     st.markdown("**Prompt** — place a box around the nodule on this slice")
@@ -178,7 +196,7 @@ with right:
     for f in res.get("flags", []):
         st.caption(f"• {f}")
 
-    st.image(f"{API}/api/jobs/{job_id}/overlay.png", width="stretch",
+    st.image(api_image(f"/api/jobs/{job_id}/overlay.png"), width="stretch",
              caption="red = model outline, yellow = the prompt box")
 
     m1, m2 = st.columns(2)
