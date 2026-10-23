@@ -82,16 +82,40 @@ try {
     }
 
     if ($Registry -like "ghcr.io/*") {
-        Write-Host "`nIf the push 401s, log in first:" -ForegroundColor Yellow
-        Write-Host "  echo <your-PAT> | docker login ghcr.io -u UtkarshYPatil --password-stdin"
-        Write-Host "  (a classic token with write:packages)`n"
+        Write-Host "`nPushing to GHCR. The two ways this fails look different:" -ForegroundColor Yellow
+        Write-Host "  401 / unauthorized -> not logged in:"
+        Write-Host "      docker login ghcr.io -u UtkarshYPatil"
+        Write-Host "  denied -> logged in, but the token cannot WRITE packages."
+        Write-Host "      Login only needs a valid token; pushing needs the"
+        Write-Host "      write:packages scope, so a read-only token logs in fine"
+        Write-Host "      and is refused here, sometimes after uploading most of"
+        Write-Host "      the image. Fix the scope at github.com/settings/tokens"
+        Write-Host "      (Tokens CLASSIC -- fine-grained tokens are unreliable"
+        Write-Host "      with GHCR), then: docker logout ghcr.io && docker login ghcr.io`n"
     }
 
-    Run "push" { docker compose push }
-    if ($Gpu) {
-        Run "push (gpu worker)" {
-            docker compose -f docker-compose.yml -f docker-compose.gpu.yml push worker
+    # Not Run{}: a push failure has a specific, guessable cause worth naming.
+    Write-Host ">> push" -ForegroundColor Cyan
+    docker compose push
+    $pushFailed = ($LASTEXITCODE -ne 0)
+    if (-not $pushFailed -and $Gpu) {
+        Write-Host ">> push (gpu worker)" -ForegroundColor Cyan
+        docker compose -f docker-compose.yml -f docker-compose.gpu.yml push worker
+        $pushFailed = ($LASTEXITCODE -ne 0)
+    }
+    if ($pushFailed) {
+        Write-Host "`nPush failed." -ForegroundColor Red
+        if ($Registry -like "ghcr.io/*") {
+            Write-Host "If it said 'denied', the token is missing write:packages." -ForegroundColor Red
+            Write-Host "Verify the scope in seconds without re-pushing gigabytes:" -ForegroundColor Yellow
+            Write-Host "  docker pull hello-world"
+            Write-Host "  docker tag hello-world $Registry/scope-test:latest"
+            Write-Host "  docker push $Registry/scope-test:latest"
+            Write-Host "A 'denied' there confirms the token. Delete the test package after."
+            Write-Host "Also check the namespace matches your username in LOWERCASE:"
+            Write-Host "  pushing to $Registry"
         }
+        exit 1
     }
 
     Write-Host "`nPublished. Send them docker-compose.pull.yml and this:" -ForegroundColor Green
