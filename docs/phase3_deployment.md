@@ -138,9 +138,27 @@ image for them and refuses to push if it finds any.
 .\scripts\publish_images.ps1 -Gpu         # also the CUDA worker
 ```
 
-GHCR packages are **private by default**. To let anyone pull without logging
-in, set each to public at `https://github.com/UtkarshYPatil?tab=packages`.
-Otherwise they need `docker login ghcr.io` with a read:packages token.
+GHCR packages are **private by default**, and that is not only an access
+question -- it is a quota. GitHub Pro includes 2 GB of storage for private
+packages; public packages are exempt. The worker image alone is larger than
+that allowance, so it cannot be published privately at all.
+
+Over the limit the failure is misleading: the blobs upload normally and only
+the manifest is refused with `denied`, so a large image fails after minutes of
+visible progress while a smaller one pushed a moment earlier succeeded. It
+reads like a permissions problem and is not one.
+
+Set each package to public at `https://github.com/UtkarshYPatil?tab=packages`,
+which also lets anyone pull without `docker login`. A package has to exist
+before its visibility can be changed, so if a push never completed, create it
+with a placeholder first:
+
+```powershell
+docker tag hello-world ghcr.io/utkarshypatil/nodule-worker:init
+docker push ghcr.io/utkarshypatil/nodule-worker:init
+```
+
+Set it public, push `:latest`, then delete the `init` version.
 
 ### What they do
 
