@@ -94,26 +94,34 @@ try {
         Write-Host "      with GHCR), then: docker logout ghcr.io && docker login ghcr.io`n"
     }
 
-    # Not Run{}: a push failure has a specific, guessable cause worth naming.
-    Write-Host ">> push" -ForegroundColor Cyan
-    docker compose push
-    $pushFailed = ($LASTEXITCODE -ne 0)
-    if (-not $pushFailed -and $Gpu) {
-        Write-Host ">> push (gpu worker)" -ForegroundColor Cyan
-        docker compose -f docker-compose.yml -f docker-compose.gpu.yml push worker
-        $pushFailed = ($LASTEXITCODE -ne 0)
+    # `docker compose push` was denied here while a plain `docker push` of the
+    # same image succeeded -- the blobs uploaded either way, only compose's
+    # manifest PUT was refused. Pushing each image directly avoids that, and
+    # gives one error per image instead of three fired at once.
+    $pushFailed = $false
+    foreach ($img in $images) {
+        Write-Host ">> push $img" -ForegroundColor Cyan
+        docker push $img
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "   FAILED: $img" -ForegroundColor Red
+            $pushFailed = $true
+        }
     }
+
     if ($pushFailed) {
-        Write-Host "`nPush failed." -ForegroundColor Red
+        Write-Host "`nOne or more pushes failed." -ForegroundColor Red
         if ($Registry -like "ghcr.io/*") {
-            Write-Host "If it said 'denied', the token is missing write:packages." -ForegroundColor Red
-            Write-Host "Verify the scope in seconds without re-pushing gigabytes:" -ForegroundColor Yellow
-            Write-Host "  docker pull hello-world"
-            Write-Host "  docker tag hello-world $Registry/scope-test:latest"
-            Write-Host "  docker push $Registry/scope-test:latest"
-            Write-Host "A 'denied' there confirms the token. Delete the test package after."
-            Write-Host "Also check the namespace matches your username in LOWERCASE:"
-            Write-Host "  pushing to $Registry"
+            Write-Host "Check, in this order:" -ForegroundColor Yellow
+            Write-Host "  1. Is the token valid?   docker login ghcr.io -u UtkarshYPatil"
+            Write-Host "  2. Can it write at all?  push a throwaway image:"
+            Write-Host "       docker pull hello-world"
+            Write-Host "       docker tag hello-world $Registry/scope-test:latest"
+            Write-Host "       docker push $Registry/scope-test:latest"
+            Write-Host "     'denied' there means the token lacks write:packages."
+            Write-Host "     It working means the token is fine and the problem is"
+            Write-Host "     this image. Delete the test package afterwards."
+            Write-Host "  3. Namespace must be your username in LOWERCASE."
+            Write-Host "     Pushing to: $Registry"
         }
         exit 1
     }
