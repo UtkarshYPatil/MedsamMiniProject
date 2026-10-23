@@ -144,18 +144,85 @@ def check_ports():
             check(f"port {port} free ({name})", OK)
 
 
-def check_disk():
-    try:
-        free = shutil.disk_usage(ROOT).free / 1e9
-    except OSError:
-        return
-    # The worker image carries torch; the GPU one carries CUDA as well.
-    if free < 12:
-        check("disk space", FAIL, f"{free:.1f} GB free; the images need roughly 12 GB")
-    elif free < 25:
-        check("disk space", WARN, f"{free:.1f} GB free; tight but probably enough")
+def _docker_storage_dir():
+    """
+    Where Docker actually keeps its images ON THE HOST.
+
+    Not the repository's drive. On Docker Desktop the data lives in a virtual
+    disk under the user profile -- usually C: -- while the repo can sit on any
+    other drive with plenty of room. Checking the wrong one reports "ok" and
+    the build still dies with "read-only file system" when the real disk fills.
+    """
+    candidates = []
+    if os.name == "nt":
+        local = os.environ.get("LOCALAPPDATA")
+        if local:
+            candidates += [Path(local) / "Docker" / "wsl", Path(local) / "Docker"]
+        candidates.append(Path("C:/ProgramData/Docker"))
     else:
-        check("disk space", OK, f"{free:.0f} GB free")
+        candidates += [Path.home() / "Library/Containers/com.docker.docker",
+                       Path("/var/lib/docker")]
+    for c in candidates:
+        try:
+            if c.exists():
+                return c
+        except OSError:
+            continue
+    return None
+
+
+def check_disk(gpu=False):
+    # The GPU worker is ~13 GB built from a 4.25 GB base layer; the CPU one is
+    # ~2.3 GB. Plus build cache, which is routinely larger than the images.
+    need = 30 if gpu else 15
+
+    store = _docker_storage_dir()
+    if store is None:
+        check("docker disk space", WARN,
+              "could not locate Docker's storage directory; check free space on "
+              "the drive holding Docker Desktop's disk image yourself")
+    else:
+        try:
+            free = shutil.disk_usage(store).free / 1e9
+        except OSError as e:
+            check("docker disk space", WARN, f"could not measure {store}: {e}")
+            return
+        where = f"{store.drive or store}"
+        if free < need * 0.5:
+            check("docker disk space", FAIL,
+                  f"{free:.1f} GB free on {where}, where Docker stores images; "
+                  f"roughly {need} GB is needed.\n"
+                  "          A full Docker disk fails midway with "
+                  "'[Errno 5] Input/output error' or\n"
+                  "          'read-only file system', which looks like a build "
+                  "bug and is not one.\n"
+                  "          Reclaim: docker system prune -a --volumes && "
+                  "docker builder prune -a")
+        elif free < need:
+            check("docker disk space", WARN,
+                  f"{free:.1f} GB free on {where}; roughly {need} GB is wanted "
+                  f"for a{'  GPU' if gpu else ''} build. Consider "
+                  "`docker builder prune`.")
+        else:
+            check("docker disk space", OK, f"{free:.0f} GB free on {where}")
+
+    # The repo's own drive only holds the build context, which is tiny.
+    try:
+        free_repo = shutil.disk_usage(ROOT).free / 1e9
+        if free_repo < 2:
+            check("repo drive space", FAIL, f"{free_repo:.1f} GB free at {ROOT}")
+    except OSError:
+        pass
+
+
+def check_reclaimable():
+    """What Docker is already holding that could be freed."""
+    code, out = run(["docker", "system", "df", "--format",
+                     "{{.Type}}\t{{.Size}}\t{{.Reclaimable}}"], timeout=60)
+    if code != 0 or not out.strip():
+        return
+    lines = [l for l in out.strip().splitlines() if l.strip()]
+    check("docker usage", OK, "\n          ".join(lines))
 
 
 def check_gpu():
@@ -192,7 +259,9 @@ def main():
             check_gpu()
     check_build_context()
     check_checkpoint()
-    check_disk()
+    check_disk(a.gpu)
+    if shutil.which('docker'):
+        check_reclaimable()
 
     fails = [r for r in _results if r[1] == FAIL]
     warns = [r for r in _results if r[1] == WARN]
