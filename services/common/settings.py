@@ -50,6 +50,10 @@ CORS_ORIGINS = [o.strip() for o in
 # series, which would be a 200 MB upload the model cannot consume anyway.
 MAX_UPLOAD_MB = _int("MAX_UPLOAD_MB", 64)
 
+# A zipped CT series is far larger than an ROI -- a few hundred 512x512 slices.
+# Separate cap so raising it does not also let someone post a 500 MB "ROI".
+MAX_DICOM_MB = _int("MAX_DICOM_MB", 600)
+
 # ------------------------------------------------------------------- model
 CHECKPOINT = os.environ.get("CHECKPOINT", "checkpoints/MedSAM2_CTLesion.pt")
 MODEL_CFG = os.environ.get("MODEL_CFG", "configs/sam2.1_hiera_t512.yaml")
@@ -78,12 +82,18 @@ try:
     WINDOW_WIDTH = _int("WINDOW_WIDTH", CFG.preprocess.window_width)
     BBOX_PADDING = _int("BBOX_PADDING", CFG.prompt.bbox_padding_px)
     PROPAGATE = _flag("PROPAGATE", CFG.prompt.propagate)
+    ROI_SIZE = _int("ROI_SIZE", CFG.preprocess.roi_size)
+    ROI_DEPTH = _int("ROI_DEPTH", CFG.preprocess.roi_depth)
 except Exception:
     # The API and UI containers do not ship configs/, and do not need to.
     WINDOW_LEVEL = _int("WINDOW_LEVEL", -600)
     WINDOW_WIDTH = _int("WINDOW_WIDTH", 1500)
     BBOX_PADDING = _int("BBOX_PADDING", 0)
     PROPAGATE = _flag("PROPAGATE", True)
+    # Must match configs/config.yaml: the geometry every reported number was
+    # measured on. roi_depth is slices EACH SIDE, so the crop is 2d+1 deep.
+    ROI_SIZE = _int("ROI_SIZE", 128)
+    ROI_DEPTH = _int("ROI_DEPTH", 16)
 
 
 def ensure_dirs():
@@ -97,6 +107,9 @@ def summary() -> dict:
         "dry_run": DRY_RUN,
         "window": f"{WINDOW_LEVEL}/{WINDOW_WIDTH} HU",
         "bbox_padding_px": BBOX_PADDING,
+        "roi": f"{2 * ROI_DEPTH + 1}x{ROI_SIZE}x{ROI_SIZE}",
+        "max_upload_mb": MAX_UPLOAD_MB,
+        "max_dicom_mb": MAX_DICOM_MB,
         "propagate": PROPAGATE,
         "data_dir": str(DATA_DIR),
     }

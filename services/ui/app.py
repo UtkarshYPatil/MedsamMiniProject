@@ -122,25 +122,60 @@ with st.sidebar:
     st.divider()
     st.subheader("Add a case")
 
-    up = st.file_uploader("ROI volume (.npz)", type=["npz"],
-                          help="image_hu (Z, Y, X) + spacing, as written by "
-                               "scripts/02_prepare_data.py")
-    if up is not None and st.button("Upload", width="stretch"):
-        try:
-            out = api("POST", "/api/cases",
-                      files={"file": (up.name, up.getvalue(), "application/octet-stream")},
-                      timeout=120)
+    t_dcm, t_roi, t_phan = st.tabs(["CT series", "ROI (.npz)", "Phantom"])
+
+    with t_dcm:
+        dcm = st.file_uploader(
+            "DICOM series (.zip)", type=["zip"],
+            help="Zip the folder of .dcm slices for ONE series. Slice order, "
+                 "HU rescaling and spacing are read from the files.")
+        st.caption(
+            "Research and education use only, on public de-identified data. "
+            "Do not upload a real patient scan. Only pixels and geometry are "
+            "read — no identifiers are stored."
+        )
+        if dcm is not None and st.button("Import series", width="stretch",
+                                         type="primary"):
+            with st.spinner("Reading the series…"):
+                try:
+                    out = api("POST", "/api/cases/dicom",
+                              files={"file": (dcm.name, dcm.getvalue(),
+                                              "application/zip")},
+                              timeout=600)
+                    st.success(f"imported {out['case_id']}")
+                    nfo = out.get("dicom", {})
+                    st.caption(f"{nfo.get('slices_used', '?')} slices · "
+                               f"HU {nfo.get('hu_range', ['?', '?'])}")
+                    for k in ("note", "warning", "thickness_vs_spacing"):
+                        if nfo.get(k):
+                            st.warning(nfo[k], icon="⚠️")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"import failed: {e}")
+
+    with t_roi:
+        up = st.file_uploader("ROI volume (.npz)", type=["npz"],
+                              help="image_hu (Z, Y, X) + spacing, as written by "
+                                   "scripts/02_prepare_data.py")
+        if up is not None and st.button("Upload", width="stretch"):
+            try:
+                out = api("POST", "/api/cases",
+                          files={"file": (up.name, up.getvalue(),
+                                          "application/octet-stream")},
+                          timeout=120)
+                st.success(f"created {out['case_id']}")
+                st.rerun()
+            except Exception as e:
+                st.error(f"upload failed: {e}")
+
+    with t_phan:
+        dia = st.slider("Phantom diameter (mm)", 3.0, 30.0, 9.0, 0.5)
+        if st.button("Create phantom", width="stretch",
+                     help="Synthetic sphere, for demonstrating the stack "
+                          "without the dataset"):
+            out = api("POST", "/api/cases/phantom", json={"diameter_mm": dia})
             st.success(f"created {out['case_id']}")
             st.rerun()
-        except Exception as e:
-            st.error(f"upload failed: {e}")
-
-    dia = st.slider("Phantom diameter (mm)", 3.0, 30.0, 9.0, 0.5)
-    if st.button("Create phantom", width="stretch",
-                 help="Synthetic sphere, for demonstrating the stack without the dataset"):
-        out = api("POST", "/api/cases/phantom", json={"diameter_mm": dia})
-        st.success(f"created {out['case_id']}")
-        st.rerun()
 
 if not case_id:
     st.stop()
@@ -152,26 +187,40 @@ sz, sy, sx = case["spacing_mm"]
 if case["source"] == "phantom":
     st.info("This is a **synthetic phantom**, not a patient scan. It exists to "
             "exercise the pipeline end to end.", icon="🧪")
+elif case["source"] == "dicom":
+    st.info(f"Imported CT series — {case.get('note') or 'geometry unknown'}. "
+            "Research and education use only.", icon="🩻")
 
 # ------------------------------------------------------------------ prompt
 left, right = st.columns([3, 2], gap="large")
 
 suggestion = suggest_for(case_id)
 auto_z = int(suggestion["slice"])
-auto_box = [float(v) for v in suggestion["box"]]
-found = suggestion.get("source") == "auto"
+source = suggestion.get("source")
+found = source == "auto"
+# A whole CT series gets no automatic box: the auto-prompt scores candidates by
+# how central they are, which is meaningless on a full chest where the centre
+# is mediastinum. box is None there and the radiologist places it.
+whole_series = source == "unavailable"
+auto_box = None if suggestion.get("box") is None else [float(v) for v in suggestion["box"]]
 
 with left:
     st.subheader("Image")
 
     # The slider browses the stack. The prompt defaults to the slice the
     # suggestion landed on, so moving the slider to look around does not
-    # silently change what gets segmented.
-    z = st.slider("Slice", 0, D - 1, auto_z, key=f"view_{case_id}")
+    # silently change what gets segmented -- except on a whole series, where
+    # browsing IS how the nodule gets found, so the two are tied together.
+    z = st.slider("Slice", 0, D - 1, min(auto_z, D - 1), key=f"view_{case_id}")
     st.image(api_image(f"/api/cases/{case_id}/slice/{z}.png"),
              width="stretch", caption=f"slice {z} of {D - 1}")
 
-    if found:
+    if whole_series:
+        st.info("**Find the nodule yourself.** This is a full series, so there "
+                "is no centre to assume. Scroll to the nodule, set the box "
+                "below on it, then press Segment. The tool measures what you "
+                "point it at — it does not detect nodules.", icon="🔎")
+    elif found:
         st.success(f"Found a likely nodule on **slice {auto_z}** "
                    f"({suggestion['info'].get('voxels', '?')} voxels, spanning "
                    f"{suggestion['info'].get('slices_spanned', '?')} slices). "
@@ -180,33 +229,48 @@ with left:
         st.warning("No likely nodule found automatically, so the box below is "
                    "just centred. Check it before segmenting.", icon="⚠️")
 
-    prompt_z, box = auto_z, auto_box
-
-    with st.expander("Adjust the prompt"):
-        st.caption(
-            "The automatic box assumes the nodule is near the middle of the "
-            "crop and ignores anything touching the edge, which is where the "
-            "chest wall enters. Override it if it has picked the wrong thing."
-        )
-        if st.checkbox("Prompt the slice I am viewing instead",
-                       value=False, key=f"usez_{case_id}"):
-            prompt_z = z
-
-        cx_d = int(round((auto_box[0] + auto_box[2]) / 2))
-        cy_d = int(round((auto_box[1] + auto_box[3]) / 2))
-        half_d = max(4, int(round(max(auto_box[2] - auto_box[0],
-                                      auto_box[3] - auto_box[1]) / 2)))
-
+    if whole_series:
+        # Manual placement is the whole job here, so it is not hidden away.
+        prompt_z = z
         c1, c2, c3 = st.columns(3)
-        cx = c1.number_input("centre x", 0, W - 1, cx_d, key=f"cx_{case_id}")
-        cy = c2.number_input("centre y", 0, H - 1, cy_d, key=f"cy_{case_id}")
-        half = c3.number_input("half-size (px)", 4, min(H, W) // 2, half_d,
+        cx = c1.number_input("centre x", 0, W - 1, W // 2, key=f"cx_{case_id}")
+        cy = c2.number_input("centre y", 0, H - 1, H // 2, key=f"cy_{case_id}")
+        half = c3.number_input("half-size (px)", 4, min(H, W) // 2, 12,
                                key=f"hs_{case_id}")
+        box = [float(max(0, cx - half)), float(max(0, cy - half)),
+               float(min(W - 1, cx + half)), float(min(H - 1, cy + half))]
+        st.caption(f"Prompting the slice you are viewing ({z}). The model is "
+                   f"given a {2 * 16 + 1}x128x128 crop around this box — the "
+                   f"same geometry every reported accuracy figure was measured "
+                   f"on.")
+    else:
+        prompt_z, box = auto_z, auto_box
 
-        if (cx, cy, half) != (cx_d, cy_d, half_d):
-            box = [float(max(0, cx - half)), float(max(0, cy - half)),
-                   float(min(W - 1, cx + half)), float(min(H - 1, cy + half))]
-            st.caption("Using your box instead of the automatic one.")
+        with st.expander("Adjust the prompt"):
+            st.caption(
+                "The automatic box assumes the nodule is near the middle of the "
+                "crop and ignores anything touching the edge, which is where the "
+                "chest wall enters. Override it if it has picked the wrong thing."
+            )
+            if st.checkbox("Prompt the slice I am viewing instead",
+                           value=False, key=f"usez_{case_id}"):
+                prompt_z = z
+
+            cx_d = int(round((auto_box[0] + auto_box[2]) / 2))
+            cy_d = int(round((auto_box[1] + auto_box[3]) / 2))
+            half_d = max(4, int(round(max(auto_box[2] - auto_box[0],
+                                          auto_box[3] - auto_box[1]) / 2)))
+
+            c1, c2, c3 = st.columns(3)
+            cx = c1.number_input("centre x", 0, W - 1, cx_d, key=f"cx_{case_id}")
+            cy = c2.number_input("centre y", 0, H - 1, cy_d, key=f"cy_{case_id}")
+            half = c3.number_input("half-size (px)", 4, min(H, W) // 2, half_d,
+                                   key=f"hs_{case_id}")
+
+            if (cx, cy, half) != (cx_d, cy_d, half_d):
+                box = [float(max(0, cx - half)), float(max(0, cy - half)),
+                       float(min(W - 1, cx + half)), float(min(H - 1, cy + half))]
+                st.caption("Using your box instead of the automatic one.")
 
     st.caption(f"prompt → slice {prompt_z}, box {[int(v) for v in box]} · "
                f"the model is given this and nothing else")
@@ -271,6 +335,12 @@ with right:
 
     st.caption(f"{res.get('slices_covered', '?')} slices · "
                f"{res.get('seconds', '?')}s on {res.get('device', '?')}")
+
+    if res.get("cropped_to_roi"):
+        oz, oy, ox = res.get("roi_origin", ["?"] * 3)
+        st.caption(f"Measured on a 33x128x128 crop at (z={oz}, y={oy}, x={ox}) "
+                   f"— the geometry the published accuracy figures were "
+                   f"measured on, not the whole series.")
 
     if res.get("density_class") and not res.get("density_calibrated", False):
         st.caption(f"Density reads as **{res['density_class']}**, but the density "

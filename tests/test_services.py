@@ -747,3 +747,75 @@ def test_no_dockerfile_copies_the_weights():
     assert not offenders, \
         "weights would be baked into an image (they are not ours to redistribute):\n  " \
         + "\n  ".join(offenders)
+
+
+def test_segment_case_crops_a_full_series_to_the_roi(monkeypatch, tmp_path):
+    """
+    End to end through the crop path: a 512-wide volume must reach the model as
+    a 33x128x128 ROI, and the mask must come back in FULL-volume coordinates so
+    the overlay and the measurements agree with the prompt the caller gave.
+    """
+    import numpy as np
+    from services.common import store
+    from services.worker import tasks
+
+    vol = np.full((80, 300, 300), -900, dtype=np.int16)
+    vol[40, 150, 150] = 60                      # something to find
+    case_id = store.save_case(vol, (1.0, 0.7, 0.7), source="dicom")
+
+    seen = {}
+    real = tasks.get_segmenter
+
+    class Spy:
+        def __init__(self, inner): self.inner = inner
+        def segment_volume(self, vol_u8, z, box, propagate=True):
+            seen["shape"] = vol_u8.shape
+            seen["z"] = z
+            seen["box"] = list(box)
+            return self.inner.segment_volume(vol_u8, z, box, propagate=propagate)
+
+    monkeypatch.setattr(tasks, "get_segmenter", lambda: Spy(real()))
+    res = tasks.segment_case(case_id, 40, [140.0, 140.0, 160.0, 160.0], True)
+
+    assert seen["shape"] == (33, 128, 128), \
+        f"the model saw {seen['shape']}, not the validated ROI geometry"
+    assert 0 <= seen["z"] < 33
+    assert all(0 <= v <= 128 for v in seen["box"]), \
+        f"box {seen['box']} was not translated into crop coordinates"
+
+    assert res["cropped_to_roi"] is True
+    oz, oy, ox = res["roi_origin"]
+    assert oz >= 0 and oy >= 0 and ox >= 0
+
+    # The mask is saved in full-volume coordinates, so a prompt at z=40 on a
+    # 80-slice volume stays at z=40 and the overlay renders the right slice.
+    assert res["prompt_slice"] == 40
+
+
+def test_segment_case_leaves_an_roi_sized_case_uncropped(monkeypatch):
+    """The existing .npz path must not start going through the crop."""
+    import numpy as np
+    from services.common import store
+    from services.worker import tasks
+
+    vol, spacing = store.make_phantom(diameter_mm=9.0)
+    assert vol.shape == (33, 128, 128)
+    case_id = store.save_case(vol, spacing, source="upload")
+
+    seen = {}
+    real = tasks.get_segmenter
+
+    class Spy:
+        def __init__(self, inner): self.inner = inner
+        def segment_volume(self, vol_u8, z, box, propagate=True):
+            seen["shape"] = vol_u8.shape
+            seen["box"] = list(box)
+            return self.inner.segment_volume(vol_u8, z, box, propagate=propagate)
+
+    monkeypatch.setattr(tasks, "get_segmenter", lambda: Spy(real()))
+    res = tasks.segment_case(case_id, 16, [50.0, 50.0, 70.0, 70.0], True)
+
+    assert seen["shape"] == (33, 128, 128)
+    assert seen["box"] == [50.0, 50.0, 70.0, 70.0], "box was translated when it should not be"
+    assert res["cropped_to_roi"] is False
+    assert res["roi_origin"] == [0, 0, 0]

@@ -199,6 +199,61 @@ x86_64 Windows machine will not run natively on an Apple Silicon Mac — Docker
 emulates it, slowly, and torch sometimes does not survive the translation. If
 the recipient is on an M-series Mac, have them use the repo and build locally.
 
+## DICOM upload
+
+`POST /api/cases/dicom` takes a **.zip of one DICOM series**. The UI exposes it
+as the first tab under "Add a case".
+
+Four things have to be right or every millimetre afterwards is wrong, and three
+of them fail silently. `services/common/dicomseries.py` handles each, and
+`tests/test_dicom.py` tests each against a synthetic series:
+
+| | what goes wrong if skipped |
+|---|---|
+| **Rescale to HU** | `HU = slope*raw + intercept`, per slice. Skip it and a −600 HU nodule reads as +424; the density classifier inverts and nothing looks broken. |
+| **Slice order** | Files arrive in zip order. Sorting by name puts IM10 before IM2. Order comes from `ImagePositionPatient`. |
+| **Slice spacing** | `SliceThickness` is what was reconstructed; the gap between slice centres is what the volume has. They differ on overlapping or gapped reconstructions, and volume scales directly with it. Measured from consecutive positions, with thickness as fallback. |
+| **Axis order** | `pixel_array` is (rows, cols) = (Y, X), so stacking gives (Z, Y, X) and spacing is `(dz, PixelSpacing[0], PixelSpacing[1])`. Transposing this still looks like a chest. |
+
+Refused with a readable reason: a non-CT series (HU only exist on CT), fewer
+than 3 slices, a series whose slices all share one position, a zip containing
+no DICOM images, and anything that is not a zip. A series whose minimum value
+is above −500 HU is flagged, because lung air sits near −1000 and anything
+higher means the rescale never happened.
+
+Several series in one zip is normal — exports carry scouts and dose reports —
+so the largest CT series wins and the response says so.
+
+**Patient data.** Only pixels and geometry are read. No name, ID, birth date,
+accession or institution is returned or stored; the case note carries only
+geometry. This is research and education software on public de-identified data
+and real patient scans do not belong in it.
+
+### The nodule is not located for you
+
+A whole series gets **no automatic prompt**. `/suggest` scores candidates by
+how central they are, which holds for an ROI cut around a centroid and is
+meaningless on a full chest, where the centre is mediastinum. It returns
+`box: null` with `source: "unavailable"` and the UI asks the radiologist to
+find the nodule and place the box. A confident box on the heart would be worse
+than no box at all.
+
+This is the tool's stated boundary, not a gap: **it measures what it is pointed
+at; it does not detect nodules.**
+
+### Cropping to the validated geometry
+
+Every accuracy figure in this project was measured on 128×128×33 crops
+(`configs/config.yaml`: `roi_size 128`, `roi_depth 16` — slices *each side*, so
+2d+1 = 33). A series is 512×512×~250.
+
+So the worker crops that same geometry around whatever box it is given before
+segmenting, and pastes the mask back into full-volume coordinates. The model
+sees what it saw during evaluation, the propagation does not have hundreds of
+slices to drift through, and results stay comparable to `outputs/results.csv`.
+An uploaded ROI is already that size and passes through untouched — the result
+reports `cropped_to_roi` either way.
+
 ## Why the API never segments inline
 
 Inference takes seconds to a minute. A request that waits for it times out
@@ -207,6 +262,7 @@ behind any reverse proxy, and the browser gives up first. So:
 ```
 POST /api/cases                   201  {case_id}        upload an ROI (.npz)
 POST /api/cases/phantom           201  {case_id}        synthetic, for demos
+POST /api/cases/dicom             201  {case_id}        upload a CT series (.zip)
 GET  /api/cases/{id}/suggest      200  {slice, box}     proposed prompt
 GET  /api/cases/{id}/slice/{z}.png                      windowed slice
 POST /api/cases/{id}/segment      202  {job_id}         body: {slice, box}

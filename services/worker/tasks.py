@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 
 import numpy as np
 
-from services.common import settings, store
+from services.common import roi, settings, store
 
 _segmenter = None
 _device = None
@@ -133,13 +133,32 @@ def segment_case(case_id: str, prompt_z: int, box, propagate: bool = True) -> di
     if not 0 <= prompt_z < vol_hu.shape[0]:
         raise ValueError(f"slice {prompt_z} outside 0..{vol_hu.shape[0] - 1}")
 
-    vol_u8 = apply_window(vol_hu, settings.WINDOW_LEVEL, settings.WINDOW_WIDTH)
+    # A whole DICOM series is cropped to the geometry every reported number was
+    # measured on (128x128x33), centred on the radiologist's box. Segmenting
+    # 512x512x250 instead would change the input distribution the model was
+    # evaluated on and give the propagation hundreds of slices to drift
+    # through. An uploaded ROI is already that size and passes through
+    # untouched.
+    cropped = roi.needs_crop(vol_hu.shape, settings.ROI_SIZE, settings.ROI_DEPTH)
+    if cropped:
+        sub_hu, sub_z, sub_box, origin = roi.crop_around(
+            vol_hu, int(prompt_z), box,
+            size=settings.ROI_SIZE, depth=settings.ROI_DEPTH)
+    else:
+        sub_hu, sub_z, sub_box, origin = (vol_hu, int(prompt_z),
+                                          [float(v) for v in box], (0, 0, 0))
+
+    vol_u8 = apply_window(sub_hu, settings.WINDOW_LEVEL, settings.WINDOW_WIDTH)
 
     seg = get_segmenter()
     t0 = time.perf_counter()
-    mask = seg.segment_volume(vol_u8, int(prompt_z), [float(v) for v in box],
-                              propagate=bool(propagate))
+    sub_mask = seg.segment_volume(vol_u8, sub_z, sub_box,
+                                  propagate=bool(propagate))
     dt = time.perf_counter() - t0
+
+    # Back into full-volume coordinates, so the mask, the overlay and the
+    # measurements all speak the same indices the caller prompted in.
+    mask = roi.paste(sub_mask, vol_hu.shape, origin) if cropped else sub_mask
 
     if not mask.any():
         return {
@@ -162,6 +181,8 @@ def segment_case(case_id: str, prompt_z: int, box, propagate: bool = True) -> di
         "dry_run": settings.DRY_RUN,
         "slices_covered": n_slices,
         "prompt_slice": int(prompt_z),
+        "cropped_to_roi": bool(cropped),
+        "roi_origin": [int(v) for v in origin],
         "measurement": meas,
         # Repeated at the top level because this is what the UI leads with.
         "diameter_mean_mm": meas.get("diameter_mean_mm"),

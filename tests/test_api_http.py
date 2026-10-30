@@ -270,3 +270,80 @@ def test_healthz_survives_a_corrupt_status_key(client):
     r = client.get("/healthz")
     assert r.status_code == 200
     assert r.json()["worker"] is None
+
+
+# -------------------------------------------------------------- DICOM upload
+
+def _dicom_zip(n=6, modality="CT"):
+    import sys, pathlib
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+    from test_dicom import _slice, _zip
+    return _zip([_slice(i, modality=modality) for i in range(n)])
+
+
+def test_dicom_series_imports_as_a_case(client):
+    pytest.importorskip("pydicom")
+    r = client.post("/api/cases/dicom",
+                    files={"file": ("series.zip", _dicom_zip(), "application/zip")})
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["source"] == "dicom"
+    assert body["shape"][0] == 6
+    assert body["dicom"]["slices_used"] == 6
+    assert body["dicom"]["spacing_z_source"] == "ImagePositionPatient"
+
+
+def test_dicom_case_records_geometry_but_no_identifiers(client):
+    pytest.importorskip("pydicom")
+    body = client.post("/api/cases/dicom",
+                       files={"file": ("s.zip", _dicom_zip(), "application/zip")}).json()
+    note = body["note"]
+    assert "slices" in note and "mm" in note
+    assert "1.2.3.4" not in note          # the SeriesInstanceUID must not leak
+
+
+def test_a_non_ct_series_is_refused_with_a_readable_reason(client):
+    pytest.importorskip("pydicom")
+    r = client.post("/api/cases/dicom",
+                    files={"file": ("mr.zip", _dicom_zip(modality="MR"),
+                                    "application/zip")})
+    assert r.status_code == 400
+    assert "not CT" in r.json()["detail"]
+
+
+def test_a_non_zip_upload_is_refused(client):
+    r = client.post("/api/cases/dicom",
+                    files={"file": ("x.zip", b"not a zip", "application/zip")})
+    assert r.status_code == 400
+    assert "zip" in r.json()["detail"].lower()
+
+
+def test_suggest_refuses_to_guess_on_a_whole_series(client, monkeypatch):
+    """
+    The auto-prompt scores candidates by how central they are. On a full chest
+    CT the centre is mediastinum, so a confident box there would be worse than
+    no box at all.
+    """
+    import numpy as np
+    from services.common import store
+
+    big = np.full((60, 256, 256), -800, dtype=np.int16)
+    case_id = store.save_case(big, (1.0, 0.7, 0.7), source="dicom")
+    from services.api import db as dbmod
+    with dbmod.SessionLocal() as sess:
+        sess.add(dbmod.Case(id=case_id, source="dicom", note="test",
+                            shape_z=60, shape_y=256, shape_x=256,
+                            spacing_z=1.0, spacing_y=0.7, spacing_x=0.7))
+        sess.commit()
+
+    s = client.get(f"/api/cases/{case_id}/suggest").json()
+    assert s["source"] == "unavailable"
+    assert s["box"] is None, "a guessed box on a whole scan is worse than none"
+    assert "does not detect" in s["info"]["detail"]
+
+
+def test_suggest_still_works_on_an_roi_sized_case(client):
+    case = client.post("/api/cases/phantom", json={"diameter_mm": 9.0}).json()
+    s = client.get(f"/api/cases/{case['case_id']}/suggest").json()
+    assert s["source"] in ("auto", "centred_fallback")
+    assert s["box"] is not None

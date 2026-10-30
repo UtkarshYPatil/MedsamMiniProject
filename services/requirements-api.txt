@@ -11,4 +11,7 @@ numpy>=1.26
 # fallback in autoprompt.py works without it, but scipy's labelling is
 # much faster and /suggest is meant to feel instant.
 scipy>=1.11
+# Reads uploaded CT series. The API does the conversion because it is pure
+# byte-shuffling -- no torch, no model -- and the worker should stay a worker.
+pydicom>=3.0
 pillow>=10.4

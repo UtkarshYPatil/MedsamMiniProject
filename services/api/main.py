@@ -26,7 +26,7 @@ from rq.job import Job as RQJob
 from sqlalchemy.orm import Session
 
 from services.api.db import Case, Job, SessionLocal, init_db
-from services.common import autoprompt, settings, store
+from services.common import autoprompt, dicomseries, roi, settings, store
 
 TASK = "services.worker.tasks.segment_case"
 
@@ -172,6 +172,57 @@ async def create_case(file: UploadFile = File(...), db: Session = Depends(get_db
     return row.as_dict()
 
 
+@app.post("/api/cases/dicom", status_code=201)
+async def create_case_dicom(file: UploadFile = File(...),
+                            db: Session = Depends(get_db)):
+    """
+    Upload a CT series as a .zip of DICOM files.
+
+    The series is converted to a Hounsfield-unit volume: slices ordered by
+    scanner geometry, RescaleSlope/Intercept applied, spacing taken from the
+    gap between slice positions. See services/common/dicomseries.py for why
+    each of those matters.
+
+    Only pixels and geometry are read. No patient identifiers are returned or
+    stored. This is research and education software on public de-identified
+    data; real patient scans do not belong in it.
+
+    The nodule is NOT located for you. A whole scan has no centre to assume,
+    so find it on the viewer and draw the box; the worker then crops the
+    validated ROI around wherever you put it.
+    """
+    limit = settings.MAX_DICOM_MB * 1024 * 1024
+    chunks, total = [], 0
+    while True:
+        chunk = await file.read(4 * 1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > limit:
+            raise HTTPException(
+                413, f"upload exceeds {settings.MAX_DICOM_MB} MB. Zip one "
+                     f"series, not a whole study.")
+        chunks.append(chunk)
+    raw = b"".join(chunks)
+
+    try:
+        image, spacing, info = dicomseries.read_zip(raw)
+    except dicomseries.DicomError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(400, f"could not read the DICOM series: {e}")
+
+    case_id = store.save_case(image, spacing, source="dicom")
+    row = Case(id=case_id, source="dicom",
+               note=dicomseries.describe(info),
+               shape_z=image.shape[0], shape_y=image.shape[1], shape_x=image.shape[2],
+               spacing_z=float(spacing[0]), spacing_y=float(spacing[1]),
+               spacing_x=float(spacing[2]))
+    db.add(row)
+    db.commit()
+    return {**row.as_dict(), "dicom": info}
+
+
 @app.post("/api/cases/phantom", status_code=201)
 def create_phantom(req: PhantomRequest, db: Session = Depends(get_db)):
     """
@@ -220,6 +271,26 @@ def suggest_prompt(case_id: str, db: Session = Depends(get_db)):
         vol, _ = store.load_case(case_id)
     except FileNotFoundError:
         raise HTTPException(404, "case record exists but its volume is missing")
+
+    # The auto-prompt scores candidates by how central they are, which holds
+    # for a crop cut around a nodule centroid and is meaningless on a whole
+    # chest CT -- the middle of that is mediastinum. Refusing is the honest
+    # answer; a confident box on the heart would be worse than none.
+    if roi.needs_crop(vol.shape, settings.ROI_SIZE, settings.ROI_DEPTH):
+        return {
+            "slice": int(vol.shape[0] // 2),
+            "box": None,
+            "source": "unavailable",
+            "info": {
+                "reason": "whole-series upload",
+                "detail": ("Automatic prompting assumes the nodule is near the "
+                           "centre of a cropped ROI. This volume is a full "
+                           "series, so find the nodule on the viewer and draw "
+                           "the box yourself. The tool measures what you point "
+                           "it at; it does not detect nodules."),
+                "shape": [int(v) for v in vol.shape],
+            },
+        }
 
     z, box, info = autoprompt.suggest_box(vol)
     if box is None:

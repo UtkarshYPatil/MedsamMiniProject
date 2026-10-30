@@ -144,7 +144,9 @@ Details and hosting notes in
 
 - **Detection is not automatic.** The tool proposes a prompt box inside an ROI
   crop, which is enough for one button in the UI, but it does not find nodules
-  in a whole scan. It assumes the nodule is roughly central and discards
+  in a whole scan. A DICOM series can be uploaded and browsed, but the
+  radiologist locates the nodule; `/suggest` refuses to guess on a full chest
+  rather than confidently boxing the mediastinum. It assumes the nodule is roughly central and discards
   anything touching the edge of the crop. All metrics remain conditional on the
   box being right, which is why every result carries a confidence flag.
 - **Density classification is unvalidated.** On 30 nodules it agreed with

@@ -11,3 +11,4 @@ fakeredis>=2.21         # in-process Redis for RQ enqueueing
 sqlalchemy>=2.0
 rq>=1.16
 python-multipart>=0.0.9 # multipart/form-data uploads
+pydicom>=3.0           # synthesises a DICOM series in tests/test_dicom.py
