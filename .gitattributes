@@ -1,0 +1,29 @@
+# Keep LF everywhere, in the repo and in the working tree.
+#
+# Without this, Windows tooling rewrites files to CRLF and every line in the
+# project shows as modified: one `git status` here listed 29 files with 5199
+# insertions and 5199 deletions, and `git diff --ignore-all-space` was empty.
+# Pure noise, and it buries real changes in review.
+#
+# It is not only cosmetic. The Dockerfiles use backslash line continuations,
+# and a CRLF file puts a carriage return after each backslash, so the shell
+# inside RUN can receive it as part of an argument -- `useradd: invalid user
+# name 'app\r'` and similar. Everything these images run is Linux; LF is the
+# correct ending for all of it, including on a Windows checkout.
+* text=auto eol=lf
+
+# Binary: never touch these.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.pdf   binary
+*.pptx  binary
+*.docx  binary
+*.npz   binary
+*.npy   binary
+*.pt    binary
+*.pth   binary
+*.zip   binary
+*.dcm   binary
+*.db    binary
