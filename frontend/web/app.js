@@ -278,6 +278,35 @@ function accent() {
   return _accent;
 }
 
+function inPicture(ev) {
+  const r = pictureRect();
+  return ev.clientX >= r.left && ev.clientX <= r.left + r.width
+      && ev.clientY >= r.top && ev.clientY <= r.top + r.height;
+}
+
+/* These ROIs are cut around a nodule centroid, so the nodule is at the middle
+   of the crop by construction. On a ground-glass lesion -- faint, no sharp
+   border -- the reader often cannot see it at all, and without a mark there
+   is nothing to aim at but the whole field. Marking the centre is honest:
+   it says where the crop was built around, not where a nodule was detected. */
+function isRoi(W, H) { return W <= 256 && H <= 256; }
+
+function markCropCentre(g, ox, oy, sx, sy, W, H) {
+  if (!isRoi(W, H)) return;                 // meaningless on a whole series
+  const cx = ox + (W / 2) * sx, cy = oy + (H / 2) * sy;
+  const a = 9;
+  g.save();
+  g.strokeStyle = accentFill(0.5);
+  g.lineWidth = 1;
+  g.beginPath();
+  g.moveTo(cx - a, cy); g.lineTo(cx - 3, cy);
+  g.moveTo(cx + 3, cy); g.lineTo(cx + a, cy);
+  g.moveTo(cx, cy - a); g.lineTo(cx, cy - 3);
+  g.moveTo(cx, cy + 3); g.lineTo(cx, cy + a);
+  g.stroke();
+  g.restore();
+}
+
 function canvasToImage(ev) {
   const r = pictureRect();
   const [, H, W] = state.shape;
@@ -296,12 +325,15 @@ function paint() {
   const g = cv.getContext("2d");
   g.setTransform(dpr, 0, 0, dpr, 0, 0);
   g.clearRect(0, 0, r.width, r.height);
-  if (!state.box || !state.shape) return;
+  if (!state.shape) return;
 
   const ir = pictureRect();
   const [, H, W] = state.shape;
   const sx = ir.width / W, sy = ir.height / H;
   const ox = ir.left - r.left, oy = ir.top - r.top;
+
+  if (!state.box) { markCropCentre(g, ox, oy, sx, sy, W, H); return; }
+
   const [x0, y0, x1, y1] = state.box;
   const L = ox + x0 * sx, T = oy + y0 * sy;
   const R = ox + x1 * sx, B = oy + y1 * sy;
@@ -348,6 +380,12 @@ function boxLabel() {
 
 el.draw.addEventListener("pointerdown", (ev) => {
   if (!state.shape) return;
+  // The canvas covers the whole viewport, but the picture is letterboxed
+  // inside it, so there are dead bars either side. canvasToImage CLAMPS, so
+  // a press in a bar silently anchors a corner to the image edge -- which is
+  // how a flick of the wrist becomes a box pinned to three sides covering
+  // half the crop. Starting a box there is never what was meant.
+  if (!inPicture(ev)) return;
   el.draw.setPointerCapture(ev.pointerId);
   state.boxSource = null;            // from here it is the reader's box
   suggestFade = 1;
