@@ -267,6 +267,14 @@ def get_case(case_id: str, db: Session = Depends(get_db)):
 # dominated, so proposing one is arming a button that cannot succeed.
 MIN_PROMPT_MM = 4.0
 
+# And above this it is not a nodule. LIDC's own inclusion criterion is 3-30 mm,
+# so a proposal wider than 40 mm has latched onto parenchyma or chest wall --
+# the auto-prompt's border check only rejects components that TOUCH the edge,
+# and a diffuse region stopping one pixel short passes it while spanning
+# almost the whole crop. That failure is worse than no proposal, because the
+# box looks deliberate and the model obediently segments the lung inside it.
+MAX_PROMPT_MM = 40.0
+
 
 @app.get("/api/cases/{case_id}/suggest")
 def suggest_prompt(case_id: str, db: Session = Depends(get_db)):
@@ -316,10 +324,15 @@ def suggest_prompt(case_id: str, db: Session = Depends(get_db)):
     if box is not None:
         w_mm = (box[2] - box[0]) * float(spacing[2])
         h_mm = (box[3] - box[1]) * float(spacing[1])
-        if min(w_mm, h_mm) < MIN_PROMPT_MM:
+        too_small = min(w_mm, h_mm) < MIN_PROMPT_MM
+        too_large = max(w_mm, h_mm) > MAX_PROMPT_MM
+        if too_small or too_large:
             info["rejected_box_mm"] = [round(w_mm, 1), round(h_mm, 1)]
-            info["reason"] = (f"best component measured {w_mm:.1f} x {h_mm:.1f} "
-                              f"mm, under the {MIN_PROMPT_MM} mm floor")
+            info["reason"] = (
+                f"best component measured {w_mm:.1f} x {h_mm:.1f} mm, "
+                + (f"under the {MIN_PROMPT_MM} mm floor" if too_small
+                   else f"over the {MAX_PROMPT_MM} mm ceiling - that is "
+                        f"parenchyma or chest wall, not a nodule"))
             box = None
 
     if box is None:

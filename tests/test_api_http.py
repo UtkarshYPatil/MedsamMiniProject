@@ -403,3 +403,36 @@ def test_suggest_never_proposes_a_box_too_small_to_measure(client, monkeypatch):
     x0, y0, x1, y1 = body["box"]
     assert (x1 - x0) >= 8 and (y1 - y0) >= 8, "the fallback must be big enough to prompt with"
     assert "rejected_box_mm" in body["info"], "the rejection has to be inspectable"
+
+
+def test_suggest_never_proposes_a_box_too_large_to_be_a_nodule(client, monkeypatch):
+    """
+    Observed on a ground-glass case: the auto-prompt proposed a box spanning
+    rows 1..126 of a 128px crop -- one pixel in from each edge, which is
+    exactly what survives a border check that only rejects components
+    TOUCHING the edge. The model then segmented the lung inside it and
+    reported an 80 mm "nodule" at -861 HU, which is air.
+
+    LIDC's own inclusion criterion is 3-30 mm. A proposal wider than that is
+    not a nodule, and offering it is worse than offering nothing, because the
+    box looks deliberate.
+    """
+    from backend.common import autoprompt
+
+    # a real-sized ROI: 128px at 0.72mm is the 92mm crop the failure came from
+    blob = _npz(shape=(32, 128, 128), spacing=(1.25, 0.72, 0.72))
+    case_id = client.post("/api/cases",
+                          files={"file": ("roi.npz", blob, "application/octet-stream")}
+                          ).json()["case_id"]
+
+    # spans the crop but stops one pixel short of every edge, as the real one did
+    monkeypatch.setattr(autoprompt, "suggest_box",
+                        lambda vol, **kw: (16, [1.0, 1.0, 126.0, 126.0], {"reason": "ok"}))
+
+    body = client.get(f"/api/cases/{case_id}/suggest").json()
+
+    assert body["source"] == "centred_fallback", \
+        "a proposal spanning the crop must be rejected, not offered"
+    assert "ceiling" in body["info"]["reason"], "the rejection must say which bound it broke"
+    x0, y0, x1, y1 = body["box"]
+    assert (x1 - x0) < 125 and (y1 - y0) < 125, "the fallback must be smaller than what it replaced"
