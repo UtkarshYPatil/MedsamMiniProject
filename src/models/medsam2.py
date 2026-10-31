@@ -110,7 +110,7 @@ class MedSAM2Segmenter:
     # -- inference ---------------------------------------------------------
 
     def segment_volume(self, vol_u8, prompt_idx, box, propagate=True,
-                       keep_largest=True):
+                       keep_largest=True, trim_area_frac=0.0):
         """
         vol_u8     : (D, H, W) uint8, already lung-windowed
         prompt_idx : index of the slice carrying the prompt
@@ -150,6 +150,12 @@ class MedSAM2Segmenter:
 
         if keep_largest and out.any():
             out = largest_connected_component(out)
+        if trim_area_frac:
+            # Propagation runs past the end of the nodule: on 902 nodules the
+            # diameter is unbiased while volume is 12% high at the median.
+            # Off unless asked -- see src/models/postprocess.py.
+            from src.models.postprocess import trim_axial_extent
+            out = trim_axial_extent(out, prompt_idx, trim_area_frac)
         return out
 
 
@@ -175,7 +181,7 @@ class DummySegmenter:
         return self
 
     def segment_volume(self, vol_u8, prompt_idx, box, propagate=True,
-                       keep_largest=True):
+                       keep_largest=True, trim_area_frac=0.0):
         D, H, W = vol_u8.shape[:3]
         x0, y0, x1, y1 = [float(v) for v in box]
         cy, cx = (y0 + y1) / 2, (x0 + x1) / 2

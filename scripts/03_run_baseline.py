@@ -56,11 +56,21 @@ def main():
     if a.dry_run:
         print("!! DRY RUN -- dummy segmenter. Results are meaningless.")
 
-    rows = []
+    rows, skipped_merged = [], 0
     for item in tqdm(manifest, desc="nodules"):
         d = np.load(proc / item["file"])
         vol_hu, gt, spacing = d["image_hu"].astype(np.float32), d["mask"], d["spacing"]
         if not gt.any():
+            continue
+        if item.get("n_annotations", 0) > 4:
+            # More than one annotation per radiologist means pylidc could not
+            # separate two nearby nodules and clustered them together -- the
+            # "Failed to reduce all groups to <= 4 Annotations" warning during
+            # preparation. The consensus mask then covers two lesions, so the
+            # measurement is of a pair. 3 of 902 at the last run, averaging
+            # Dice 0.52. Scoring against them measures the clustering, not
+            # the model.
+            skipped_merged += 1
             continue
 
         vol_u8 = apply_window(vol_hu, CFG.preprocess.window_level,
@@ -105,6 +115,9 @@ def main():
     # headline numbers
     print("\n" + "=" * 58)
     print(f"n = {len(df)} nodules")
+    if skipped_merged:
+        print(f"  ({skipped_merged} excluded: >4 annotations, so pylidc merged "
+              f"two nodules into one cluster)")
     for m in ("dice", "iou", "hd95_mm"):
         v = df[m].dropna()
         if len(v):

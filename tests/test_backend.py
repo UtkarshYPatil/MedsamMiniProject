@@ -874,3 +874,84 @@ def test_the_data_directories_are_owned_by_that_user():
             continue
         assert re.search(r"chown\s+-R\s+app:app[^\n]*/data", text), \
             f"{df.name} makes /data but never chowns it to app"
+
+
+# ------------------------------------------- propagation trim (postprocess)
+
+def _mask_with_areas(areas, h=40, w=40):
+    import numpy as np
+    m = np.zeros((len(areas), h, w), dtype=bool)
+    for i, a in enumerate(areas):
+        if a:
+            m[i].flat[:a] = True
+    return m
+
+
+def test_trim_is_off_by_default():
+    """It must change nothing unless a threshold is asked for."""
+    from src.models.postprocess import trim_axial_extent
+    m = _mask_with_areas([0, 40, 120, 40] + [3] * 8)
+    assert trim_axial_extent(m, 2) is m
+
+
+def test_trim_keeps_a_nodule_that_tapers_to_zero():
+    """
+    A real nodule's last slices are small. The first version of this cut them
+    and threw away correct volume; the second kept them only when the scan ran
+    off the end of the array, which a real nodule never does -- it ends by
+    reaching an empty slice.
+    """
+    from src.models.postprocess import trim_axial_extent
+    m = _mask_with_areas([0, 0, 5, 40, 120, 200, 120, 40, 5, 0, 0])
+    assert trim_axial_extent(m, 5, 0.15).sum() == m.sum()
+
+
+def test_trim_cuts_a_persistent_low_tail():
+    """Drift holds at a few voxels for many slices instead of ending."""
+    from src.models.postprocess import trim_axial_extent, describe_trim
+    m = _mask_with_areas([0, 0, 40, 120, 200, 120, 40] + [3] * 12)
+    d = describe_trim(m, trim_axial_extent(m, 4, 0.15))
+    assert d["slices_after"] < d["slices_before"]
+    assert d["voxels_removed"] > 0
+
+
+def test_trim_handles_each_direction_independently():
+    """A clean taper on one side must survive drift on the other."""
+    from src.models.postprocess import trim_axial_extent
+    m = _mask_with_areas([0, 8, 60, 150, 60, 8] + [2] * 10)
+    t = trim_axial_extent(m, 3, 0.15)
+    assert t[1].any(), "the taper on the clean side was discarded"
+    assert not t[-1].any(), "the drift tail survived"
+
+
+def test_trim_never_mutates_its_input():
+    import numpy as np
+    from src.models.postprocess import trim_axial_extent
+    m = _mask_with_areas([0, 40, 200, 40] + [2] * 9)
+    before = m.copy()
+    trim_axial_extent(m, 2, 0.3)
+    assert np.array_equal(m, before)
+
+
+def test_trim_declines_when_the_prompt_slice_is_empty():
+    """With no area at the prompt there is no scale; trimming would guess."""
+    from src.models.postprocess import trim_axial_extent
+    m = _mask_with_areas([0, 0, 0, 50, 60, 0])
+    assert trim_axial_extent(m, 0, 0.2).sum() == m.sum()
+
+
+def test_trim_leaves_a_uniform_mask_alone():
+    from src.models.postprocess import trim_axial_extent
+    m = _mask_with_areas([200] * 9)
+    assert trim_axial_extent(m, 4, 0.15).sum() == m.sum()
+
+
+def test_the_segmenter_exposes_the_trim_and_defaults_it_off():
+    """Both segmenters must take the argument, so callers can swap freely."""
+    import inspect
+    from src.models.medsam2 import DummySegmenter, MedSAM2Segmenter
+    for cls in (DummySegmenter, MedSAM2Segmenter):
+        sig = inspect.signature(cls.segment_volume)
+        assert "trim_area_frac" in sig.parameters, cls.__name__
+        assert sig.parameters["trim_area_frac"].default == 0.0, \
+            f"{cls.__name__} must not trim unless asked"

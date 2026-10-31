@@ -30,6 +30,13 @@ prompt:
   bbox_padding_px: 0
   propagate: true           # use MedSAM2 volume propagation
 
+  # Trim slices where propagation has run past the end of the nodule.
+  # 0 = off, which is the measured default until the ablation says otherwise:
+  # on 902 nodules diameter is unbiased (-0.01 mm) while volume is 12% high at
+  # the median, which places the error on slices beyond the lesion.
+  # scripts/13_ablate_propagation.py sweeps this.
+  trim_area_frac: 0.0
+
 eval:
   n_scans: 50               # cap for a first baseline run
   seed: 42
