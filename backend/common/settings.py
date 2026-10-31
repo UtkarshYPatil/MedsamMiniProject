@@ -54,6 +54,12 @@ MAX_UPLOAD_MB = _int("MAX_UPLOAD_MB", 64)
 # Separate cap so raising it does not also let someone post a 500 MB "ROI".
 MAX_DICOM_MB = _int("MAX_DICOM_MB", 600)
 
+# The caps above bound COMPRESSED bytes. Zeros compress ~1000:1, so a 0.2 MB
+# .npz expands to a 210 MB array. This bounds what may be materialised.
+# A full CT series is ~250 MB uncompressed, so 2 GB is generous for real data
+# and still refuses a bomb.
+MAX_DECOMPRESSED_MB = _int("MAX_DECOMPRESSED_MB", 2048)
+
 # ------------------------------------------------------------------- model
 CHECKPOINT = os.environ.get("CHECKPOINT", "checkpoints/MedSAM2_CTLesion.pt")
 MODEL_CFG = os.environ.get("MODEL_CFG", "configs/sam2.1_hiera_t512.yaml")

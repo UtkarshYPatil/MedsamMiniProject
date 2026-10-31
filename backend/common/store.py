@@ -7,23 +7,69 @@ consumes a 128x128x33 crop, so a case is about 1 MB where a full series is
 200 MB. See docs/phase3_deployment.md.
 """
 import io
+import re
 import uuid
+import zipfile
 
 import numpy as np
 
 from backend.common import settings
 
 
+def guard_decompression_bomb(raw: bytes, limit_mb: int, what: str = "upload"):
+    """
+    Refuse an archive that expands far beyond its transfer size.
+
+    Both .npz and a DICOM .zip are zip archives, and the upload cap bounds the
+    COMPRESSED bytes only. Zeros compress about 1000:1, so a 0.2 MB .npz
+    expands to a 210 MB array and a 64 MB one to roughly 66 GB -- measured,
+    not estimated. Reading it is what exhausts the machine, so the size has to
+    be checked from the header before anything is read.
+
+    The zip header's declared sizes are attacker-controlled, so this is a
+    cheap first gate, not a guarantee; the real protection is that nothing
+    is materialised until it passes.
+    """
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(raw))
+    except zipfile.BadZipFile:
+        return                      # not a zip; the caller's parser will refuse it
+    total = sum(i.file_size for i in zf.infolist())
+    limit = limit_mb * 1024 * 1024
+    if total > limit:
+        raise ValueError(
+            f"{what} expands to {total / 1e6:.0f} MB, over the "
+            f"{limit_mb} MB limit, from only {len(raw) / 1e6:.1f} MB "
+            f"transferred. Refusing to read it.")
+
+
 def new_id() -> str:
     return uuid.uuid4().hex[:12]
 
 
+_ID_OK = re.compile(r"\A[A-Za-z0-9_-]{1,64}\Z")
+
+
+def _safe_id(value: str, kind: str) -> str:
+    """
+    Ids come from the URL and are concatenated into a filesystem path.
+
+    Today every route that reaches the filesystem looks the id up in the
+    database first, so a traversal attempt never gets this far. That is a
+    property of the callers, not of this function, and one refactor would
+    remove it. Ids we mint are uuid4 hex, so this costs nothing.
+    """
+    if not isinstance(value, str) or not _ID_OK.match(value):
+        raise ValueError(f"invalid {kind}: {value!r}")
+    return value
+
+
 def case_path(case_id: str):
-    return settings.CASES_DIR / f"{case_id}.npz"
+    return settings.CASES_DIR / f"{_safe_id(case_id, 'case id')}.npz"
 
 
 def mask_path(job_id: str):
-    return settings.MASKS_DIR / f"{job_id}.npz"
+    return settings.MASKS_DIR / f"{_safe_id(job_id, 'job id')}.npz"
 
 
 def save_case(image_hu: np.ndarray, spacing, case_id=None, source="upload") -> str:
@@ -58,6 +104,7 @@ def read_npz_upload(raw: bytes):
     absent, which keeps millimetre outputs honest rather than silently wrong:
     they will be wrong by a known factor the caller can see.
     """
+    guard_decompression_bomb(raw, settings.MAX_DECOMPRESSED_MB, "this .npz")
     with np.load(io.BytesIO(raw), allow_pickle=False) as d:
         keys = set(d.files)
         for name in ("image_hu", "image", "vol", "volume"):

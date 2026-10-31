@@ -955,3 +955,71 @@ def test_the_segmenter_exposes_the_trim_and_defaults_it_off():
         assert "trim_area_frac" in sig.parameters, cls.__name__
         assert sig.parameters["trim_area_frac"].default == 0.0, \
             f"{cls.__name__} must not trim unless asked"
+
+
+# ----------------------------------------------------- decompression bombs
+
+def test_an_npz_bomb_is_refused_before_it_is_materialised():
+    """
+    The upload cap bounds COMPRESSED bytes. Zeros compress about 1000:1, so a
+    0.2 MB .npz expanded to a 210 MB array and a 64 MB one would have reached
+    roughly 66 GB -- measured, not estimated. Reading it is what exhausts the
+    machine, so it has to be refused from the header.
+    """
+    import io
+    import numpy as np
+    import pytest
+    from backend.common import store
+
+    big = np.zeros((400, 512, 512), dtype=np.int16)      # 210 MB in memory
+    buf = io.BytesIO()
+    np.savez_compressed(buf, image_hu=big,
+                        spacing=np.array([1., 1., 1.], np.float32))
+    raw = buf.getvalue()
+    assert len(raw) < 1_000_000, "the payload must be small to be a bomb"
+
+    with pytest.raises(ValueError, match="expands to"):
+        store.guard_decompression_bomb(raw, limit_mb=16, what="test")
+
+
+def test_a_normal_roi_upload_still_passes_the_guard():
+    import io
+    import numpy as np
+    from backend.common import store, settings
+
+    vol = np.random.randint(-1000, 200, (33, 128, 128)).astype(np.int16)
+    buf = io.BytesIO()
+    np.savez_compressed(buf, image_hu=vol,
+                        spacing=np.array([1., .7, .7], np.float32))
+    raw = buf.getvalue()
+    store.guard_decompression_bomb(raw, settings.MAX_DECOMPRESSED_MB)
+    img, sp = store.read_npz_upload(raw)
+    assert img.shape == (33, 128, 128)
+
+
+def test_the_guard_ignores_input_that_is_not_a_zip():
+    """Letting the real parser produce the error message is clearer."""
+    from backend.common import store
+    store.guard_decompression_bomb(b"not a zip at all", limit_mb=1)
+
+
+def test_a_dicom_zip_bomb_is_refused(monkeypatch):
+    import io
+    import zipfile
+    import pytest
+    from backend.common import dicomseries, settings
+
+    # Lower the limit rather than build gigabytes: the guard compares the
+    # archive's declared size against the limit, so shrinking either side
+    # exercises the same branch. Building 2 GB of zeros added 15 s to the
+    # suite, and a slow suite is one people stop running.
+    monkeypatch.setattr(settings, "MAX_DECOMPRESSED_MB", 8)
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("slice.dcm", b"\0" * (32 * 1024 * 1024))   # 32 MB > 8 MB
+    raw = buf.getvalue()
+    assert len(raw) < 200_000, "must stay tiny on the wire to be a bomb"
+
+    with pytest.raises(dicomseries.DicomError, match="expands to"):
+        dicomseries.read_zip(raw)

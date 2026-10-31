@@ -97,6 +97,18 @@ def read_zip(raw: bytes):
     except zipfile.BadZipFile:
         raise DicomError("that is not a readable .zip file")
 
+    # The upload cap bounds compressed bytes. A 0.2 MB member of zeros
+    # expands to 200 MB, so the archive has to be checked before anything is
+    # read out of it.
+    from backend.common import settings as _s
+    declared = sum(i.file_size for i in zf.infolist())
+    limit = _s.MAX_DECOMPRESSED_MB * 1024 * 1024
+    if declared > limit:
+        raise DicomError(
+            f"this zip expands to {declared / 1e6:.0f} MB, over the "
+            f"{_s.MAX_DECOMPRESSED_MB} MB limit, from {len(raw) / 1e6:.1f} MB "
+            f"transferred. A chest CT series is about 250 MB.")
+
     names = [n for n in zf.namelist()
              if not n.endswith("/") and not n.split("/")[-1].startswith(".")]
     if not names:
