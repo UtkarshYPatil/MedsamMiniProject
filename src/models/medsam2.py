@@ -110,7 +110,8 @@ class MedSAM2Segmenter:
     # -- inference ---------------------------------------------------------
 
     def segment_volume(self, vol_u8, prompt_idx, box, propagate=True,
-                       keep_largest=True, trim_area_frac=0.0):
+                       keep_largest=True, trim_area_frac=0.0,
+                       mask_threshold=0.0, return_logits=False):
         """
         vol_u8     : (D, H, W) uint8, already lung-windowed
         prompt_idx : index of the slice carrying the prompt
@@ -124,6 +125,9 @@ class MedSAM2Segmenter:
         images = self._prepare(vol_u8)
         box = np.asarray(box, dtype=np.float32)
         out = np.zeros((D, H, W), dtype=bool)
+        # Kept only when asked. 33x128x128 float32 is 2 MB, so a sweep over
+        # thresholds costs one inference instead of one per threshold.
+        logit_vol = np.full((D, H, W), -1e4, np.float32) if return_logits else None
 
         use_cuda = self.device == "cuda"
         autocast = (torch.autocast("cuda", dtype=torch.bfloat16) if use_cuda
@@ -144,7 +148,15 @@ class MedSAM2Segmenter:
                 )
                 for frame_idx, _obj_ids, logits in pred.propagate_in_video(
                         state, reverse=reverse):
-                    out[frame_idx, (logits[0] > 0.0).cpu().numpy()[0]] = True
+                    lg = logits[0].cpu().numpy()[0]
+                    # The threshold was hardcoded at 0.0 (sigmoid 0.5) and
+                    # never swept, while volume ran 8% high across 902
+                    # nodules. Raising it shrinks the mask everywhere, which
+                    # is where most of that excess turned out to live.
+                    out[frame_idx, lg > mask_threshold] = True
+                    if logit_vol is not None:
+                        np.maximum(logit_vol[frame_idx], lg,
+                                   out=logit_vol[frame_idx])
 
             pred.reset_state(state)
 
@@ -156,6 +168,8 @@ class MedSAM2Segmenter:
             # Off unless asked -- see src/models/postprocess.py.
             from src.models.postprocess import trim_axial_extent
             out = trim_axial_extent(out, prompt_idx, trim_area_frac)
+        if return_logits:
+            return out, logit_vol
         return out
 
 
@@ -181,7 +195,8 @@ class DummySegmenter:
         return self
 
     def segment_volume(self, vol_u8, prompt_idx, box, propagate=True,
-                       keep_largest=True, trim_area_frac=0.0):
+                       keep_largest=True, trim_area_frac=0.0,
+                       mask_threshold=0.0, return_logits=False):
         D, H, W = vol_u8.shape[:3]
         x0, y0, x1, y1 = [float(v) for v in box]
         cy, cx = (y0 + y1) / 2, (x0 + x1) / 2
@@ -197,6 +212,9 @@ class DummySegmenter:
             shrink = np.sqrt(max(1e-6, 1 - (off / (span + 1)) ** 2))
             out[d] = (((yy - cy) ** 2) / (ry * shrink) ** 2
                       + ((xx - cx) ** 2) / (rx * shrink) ** 2) <= 1.0
+        if return_logits:
+            # A crude stand-in so the ablation can be exercised dry.
+            return out, np.where(out, 2.0, -2.0).astype(np.float32)
         return out
 
 
