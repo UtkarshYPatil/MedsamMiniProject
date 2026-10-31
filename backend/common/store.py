@@ -72,19 +72,59 @@ def mask_path(job_id: str):
     return settings.MASKS_DIR / f"{_safe_id(job_id, 'job id')}.npz"
 
 
-def save_case(image_hu: np.ndarray, spacing, case_id=None, source="upload") -> str:
-    """Persist an ROI volume. Returns the case id."""
+def save_case(image_hu: np.ndarray, spacing, case_id=None, source="upload",
+              reference: np.ndarray | None = None) -> str:
+    """
+    Persist an ROI volume. Returns the case id.
+
+    `reference` is the radiologist consensus mask that LIDC ships with the
+    annotated data. It is kept so the viewer can SHOW the reader where the
+    lesion is -- a ground-glass nodule is close to invisible by eye, and
+    without it there is nothing to aim the box at. It is reference data and
+    never reaches the model: nothing in the segmentation path reads it.
+    """
     if image_hu.ndim != 3:
         raise ValueError(f"image_hu must be 3D (Z, Y, X), got shape {image_hu.shape}")
     case_id = case_id or new_id()
     settings.ensure_dirs()
-    np.savez_compressed(
-        case_path(case_id),
+    arrays = dict(
         image_hu=image_hu.astype(np.int16),
         spacing=np.asarray(spacing, dtype=np.float32),
         source=np.asarray(source),
     )
+    if reference is not None and np.asarray(reference).shape == image_hu.shape:
+        arrays["reference"] = np.asarray(reference).astype(bool)
+    np.savez_compressed(case_path(case_id), **arrays)
     return case_id
+
+
+def load_reference(case_id: str):
+    """The stored consensus mask, or None when the case carries no annotation."""
+    p = case_path(case_id)
+    if not p.exists():
+        raise FileNotFoundError(f"no such case: {case_id}")
+    with np.load(p, allow_pickle=False) as d:
+        if "reference" not in d.files:
+            return None
+        return d["reference"].astype(bool)
+
+
+def reference_from_npz(raw: bytes):
+    """
+    Pull the consensus mask out of an uploaded npz, if it has one.
+
+    scripts/02_prepare_data.py writes it as 'mask'. Never raises: a case
+    without an annotation is the normal situation, not an error.
+    """
+    try:
+        with np.load(io.BytesIO(raw), allow_pickle=False) as d:
+            for name in ("mask", "reference", "gt"):
+                if name in d.files:
+                    m = np.asarray(d[name])
+                    return m.astype(bool) if m.ndim == 3 else None
+    except Exception:
+        pass
+    return None
 
 
 def load_case(case_id: str):

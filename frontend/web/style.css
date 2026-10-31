@@ -254,6 +254,7 @@ button { font: inherit; cursor: pointer; border-radius: 999px; }
   transition: border-color 180ms var(--ease-out), color 180ms var(--ease-out),
               transform 160ms var(--ease-out);
 }
+.ghost.inline { width: auto; padding: 0.55rem 1rem; }
 .ghost:hover { border-color: var(--signal-b); color: var(--text); }
 .ghost:active { transform: scale(0.98); }
 

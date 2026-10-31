@@ -169,7 +169,8 @@ async def create_case(file: UploadFile = File(...), db: Session = Depends(get_db
     except Exception as e:
         raise HTTPException(400, f"could not read the uploaded npz: {e}")
 
-    case_id = store.save_case(image, spacing, source="upload")
+    case_id = store.save_case(image, spacing, source="upload",
+                              reference=store.reference_from_npz(raw))
     row = Case(id=case_id, source="upload", note=file.filename or "",
                shape_z=image.shape[0], shape_y=image.shape[1], shape_x=image.shape[2],
                spacing_z=float(spacing[0]), spacing_y=float(spacing[1]),
@@ -259,7 +260,51 @@ def get_case(case_id: str, db: Session = Depends(get_db)):
     row = db.get(Case, case_id)
     if not row:
         raise HTTPException(404, "no such case")
-    return row.as_dict()
+    out = row.as_dict()
+    try:
+        out["has_reference"] = store.load_reference(case_id) is not None
+    except FileNotFoundError:
+        out["has_reference"] = False
+    return out
+
+
+@app.get("/api/cases/{case_id}/reference")
+def reference_box(case_id: str, db: Session = Depends(get_db)):
+    """
+    Where the radiologists said the lesion is.
+
+    This is LIDC's reader consensus, shipped with the annotated data -- not a
+    prediction, and not something that exists for a real scan. It is here
+    because the tool measures what it is pointed at, and on a ground-glass
+    lesion the reader often cannot see what to point at. Showing the
+    reference turns "draw a box somewhere" into a question with a checkable
+    answer, and lets the viewer reproduce the offline baseline, which used
+    exactly this box.
+
+    The model never sees it. Segmentation reads image_hu and the prompt box.
+    """
+    if not db.get(Case, case_id):
+        raise HTTPException(404, "no such case")
+    try:
+        ref = store.load_reference(case_id)
+    except FileNotFoundError:
+        raise HTTPException(404, "case record exists but its volume is missing")
+    if ref is None or not ref.any():
+        raise HTTPException(404, "this case carries no reference annotation")
+
+    areas = ref.reshape(ref.shape[0], -1).sum(axis=1)
+    z = int(np.argmax(areas))
+    ys, xs = np.where(ref[z])
+    pad = settings.BBOX_PADDING
+    H, W = ref.shape[1], ref.shape[2]
+    box = [float(max(0, xs.min() - pad)), float(max(0, ys.min() - pad)),
+           float(min(W - 1, xs.max() + pad)), float(min(H - 1, ys.max() + pad))]
+    return {
+        "slice": z,
+        "box": box,
+        "source": "lidc_consensus",
+        "slices_annotated": int((areas > 0).sum()),
+    }
 
 
 # Below this, a proposed box cannot produce a number the tool would stand

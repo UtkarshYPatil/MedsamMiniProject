@@ -436,3 +436,65 @@ def test_suggest_never_proposes_a_box_too_large_to_be_a_nodule(client, monkeypat
     assert "ceiling" in body["info"]["reason"], "the rejection must say which bound it broke"
     x0, y0, x1, y1 = body["box"]
     assert (x1 - x0) < 125 and (y1 - y0) < 125, "the fallback must be smaller than what it replaced"
+
+
+def _npz_with_reference():
+    """An npz as scripts/02_prepare_data.py writes it: image AND consensus mask."""
+    import io as _io
+    shape = (32, 128, 128)
+    vol = np.full(shape, -800, dtype=np.int16)
+    mask = np.zeros(shape, dtype=bool)
+    # a small lesion well off centre, so a centred box would NOT find it
+    vol[14:19, 30:40, 90:100] = 40
+    mask[14:19, 30:40, 90:100] = True
+    buf = _io.BytesIO()
+    np.savez_compressed(buf, image_hu=vol, mask=mask,
+                        spacing=np.asarray([1.25, 0.72, 0.72], dtype=np.float32))
+    return buf.getvalue()
+
+
+def test_reference_box_comes_back_where_the_readers_drew_it(client):
+    """
+    The consensus mask ships with the annotated ROIs and used to be dropped on
+    upload. It is kept now because the tool measures what it is pointed at,
+    and a ground-glass lesion is close to invisible -- without this there is
+    nothing to aim at. It is also the box the offline baseline used, so the
+    UI can be checked against the number claimed for it.
+    """
+    case_id = client.post("/api/cases",
+                          files={"file": ("roi.npz", _npz_with_reference(),
+                                          "application/octet-stream")}).json()["case_id"]
+
+    assert client.get(f"/api/cases/{case_id}").json()["has_reference"] is True
+
+    r = client.get(f"/api/cases/{case_id}/reference").json()
+    assert r["source"] == "lidc_consensus"
+    assert r["slices_annotated"] == 5
+    x0, y0, x1, y1 = r["box"]
+    # the lesion sits at x 90..99, y 30..39; padding may widen it, never shift it
+    assert x0 <= 90 and x1 >= 99 and y0 <= 30 and y1 >= 39
+    assert 14 <= r["slice"] <= 18
+
+
+def test_a_case_without_an_annotation_says_so_instead_of_inventing_one(client):
+    """A real scan has no consensus mask. That must be a plain 404."""
+    case_id = client.post("/api/cases",
+                          files={"file": ("roi.npz", _npz(), "application/octet-stream")}
+                          ).json()["case_id"]
+    assert client.get(f"/api/cases/{case_id}").json()["has_reference"] is False
+    assert client.get(f"/api/cases/{case_id}/reference").status_code == 404
+
+
+def test_the_reference_mask_never_reaches_the_segmentation_path():
+    """
+    It is reference data, not an input. If the worker could read it, every
+    number this project reports would be worthless.
+    """
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parents[1]
+    offenders = []
+    for path in sorted(root.glob("backend/worker/*.py")):
+        text = path.read_text(encoding="utf-8")
+        if "load_reference" in text or "reference_from_npz" in text:
+            offenders.append(str(path.relative_to(root)))
+    assert not offenders, f"the worker must not read the consensus mask: {offenders}"

@@ -23,6 +23,7 @@ const el = {
   idle: $("idle"), result: $("result"), conf: $("conf"), flags: $("flags"),
   overlay: $("overlay"), prov: $("prov"), json: $("json"),
   diam: $("d-diam"), vol: $("d-vol"), max: $("d-max"), hu: $("d-hu"),
+  refbox: $("refbox"),
 };
 
 const state = {
@@ -157,6 +158,13 @@ async function openCase(id) {
   const c = await api(`/api/cases/${id}`);
   state.shape = c.shape;
   state.spacing = c.spacing_mm;
+
+  // LIDC ships a reader consensus with the annotated ROIs. Offering it is
+  // not cheating: the tool measures what it is pointed at, and on a
+  // ground-glass lesion the reader cannot see what to point at. It is also
+  // the box the offline baseline used, so this is how the UI can be checked
+  // against the 0.766 that is claimed for it.
+  el.refbox.hidden = !c.has_reference;
 
   const mid = Math.floor(c.shape[0] / 2);
   el.z.max = String(c.shape[0] - 1);
@@ -378,6 +386,27 @@ function boxLabel() {
   el.boxlabel.textContent = `${w.toFixed(1)} × ${h.toFixed(1)} mm`;
 }
 
+el.refbox.addEventListener("click", async () => {
+  if (!state.caseId) return;
+  try {
+    const r = await api(`/api/cases/${state.caseId}/reference`);
+    el.z.value = String(r.slice);
+    setSlice(r.slice);
+    state.box = r.box.map(Number);
+    state.boxSource = "reference";
+    el.run.disabled = false;
+    el.hint.hidden = true;
+    boxLabel();
+    fadeInProposal();
+    alert_(`This is the LIDC reader consensus, across ${r.slices_annotated} ` +
+           "slices - reference data that came with the case, not a detection. " +
+           "A real scan has none. Measure from here to compare the model " +
+           "against the radiologists on the same box.", "warn");
+  } catch (e) {
+    alert_(`No reference contour for this case. ${e.message}`);
+  }
+});
+
 el.draw.addEventListener("pointerdown", (ev) => {
   if (!state.shape) return;
   // The canvas covers the whole viewport, but the picture is letterboxed
@@ -530,6 +559,9 @@ function show(res, jobId) {
   el.result.classList.remove("reveal");
   void el.result.offsetWidth;
   el.result.classList.add("reveal");
+  // The measure flow clears notices, which deleted this warning at exactly
+  // the moment it mattered: attached to the wrong-looking number it explains.
+  warnIfLoose();
 
   const level = res.confidence || "unknown";
   el.conf.className = `conf ${level}`;
