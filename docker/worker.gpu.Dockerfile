@@ -32,6 +32,19 @@ COPY services/ /app/services/
 
 VOLUME ["/app/checkpoints"]
 
-RUN mkdir -p /data/cases /data/masks /app/checkpoints
+# Same uid as the API and the CPU worker. /data is a volume SHARED with the
+# API, so the two must write as the same user or whatever one creates the
+# other cannot touch.
+#
+# This image used to run as root. Everything worked until the volume happened
+# to be initialised by this container rather than the API -- then /data/cases
+# belonged to root and every upload failed with
+#   PermissionError: [Errno 13] Permission denied: '/data/cases/<id>.npz'
+# which looks like a code bug and is a uid mismatch. Whether it broke depended
+# on container start order, so it worked for days and then did not.
+RUN useradd --create-home --uid 10001 app \
+ && mkdir -p /data/cases /data/masks /app/checkpoints \
+ && chown -R app:app /app /data
+USER app
 
 CMD ["python", "-m", "services.worker.run"]

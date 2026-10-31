@@ -819,3 +819,58 @@ def test_segment_case_leaves_an_roi_sized_case_uncropped(monkeypatch):
     assert seen["box"] == [50.0, 50.0, 70.0, 70.0], "box was translated when it should not be"
     assert res["cropped_to_roi"] is False
     assert res["roi_origin"] == [0, 0, 0]
+
+
+# ------------------------------------------------- container user agreement
+
+def test_every_image_sharing_the_data_volume_uses_the_same_uid():
+    """
+    /data is one volume shared by the api and whichever worker is running. If
+    they run as different users, whatever one creates the other cannot write,
+    and the symptom depends on which container happened to initialise the
+    volume -- so it works for days and then does not.
+
+    This is not hypothetical. worker.gpu.Dockerfile ran as root while the api
+    ran as uid 10001, and every upload eventually failed with
+    PermissionError: [Errno 13] Permission denied: '/data/cases/<id>.npz',
+    which reads as a code bug and is a uid mismatch.
+    """
+    import pathlib
+    import re
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    uids, missing_user = {}, []
+
+    for df in sorted((root / "docker").glob("*.Dockerfile")):
+        text = df.read_text(encoding="utf-8")
+        if "/data" not in text:
+            continue                     # the UI never touches the volume
+
+        m = re.search(r"useradd[^\n]*--uid\s+(\d+)", text)
+        if not m:
+            missing_user.append(df.name)
+            continue
+        uids[df.name] = m.group(1)
+
+        assert re.search(r"^USER\s+app\s*$", text, re.M), \
+            f"{df.name} creates the app user but never switches to it"
+
+    assert not missing_user, (
+        "these images write to the shared /data volume but create no user, so "
+        f"they run as root: {missing_user}")
+    assert len(set(uids.values())) == 1, \
+        f"images sharing /data run as different uids: {uids}"
+
+
+def test_the_data_directories_are_owned_by_that_user():
+    """Creating the dirs as root and then switching user leaves them unwritable."""
+    import pathlib
+    import re
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    for df in sorted((root / "docker").glob("*.Dockerfile")):
+        text = df.read_text(encoding="utf-8")
+        if "/data" not in text or "useradd" not in text:
+            continue
+        assert re.search(r"chown\s+-R\s+app:app[^\n]*/data", text), \
+            f"{df.name} makes /data but never chowns it to app"
