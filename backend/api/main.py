@@ -1,7 +1,7 @@
 """
 Nodule measurement API.
 
-    uvicorn services.api.main:app --host 0.0.0.0 --port 8000
+    uvicorn backend.api.main:app --host 0.0.0.0 --port 8000
 
 Segmentation is never run inside a request. A request enqueues a job and
 returns immediately; the client polls. Inference takes about a second on a
@@ -25,10 +25,10 @@ from rq import Queue
 from rq.job import Job as RQJob
 from sqlalchemy.orm import Session
 
-from services.api.db import Case, Job, SessionLocal, init_db
-from services.common import autoprompt, dicomseries, roi, settings, store
+from backend.api.db import Case, Job, SessionLocal, init_db
+from backend.common import autoprompt, dicomseries, roi, settings, store
 
-TASK = "services.worker.tasks.segment_case"
+TASK = "backend.worker.tasks.segment_case"
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
@@ -180,7 +180,7 @@ async def create_case_dicom(file: UploadFile = File(...),
 
     The series is converted to a Hounsfield-unit volume: slices ordered by
     scanner geometry, RescaleSlope/Intercept applied, spacing taken from the
-    gap between slice positions. See services/common/dicomseries.py for why
+    gap between slice positions. See backend/common/dicomseries.py for why
     each of those matters.
 
     Only pixels and geometry are read. No patient identifiers are returned or

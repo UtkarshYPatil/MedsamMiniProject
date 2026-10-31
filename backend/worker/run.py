@@ -1,7 +1,7 @@
 """
 Worker entry point.
 
-    python -m services.worker.run
+    python -m backend.worker.run
 
 Scale by running more of these -- `docker compose up --scale worker=4`. They
 share one Redis queue and need no coordination, which is the whole reason the
@@ -13,7 +13,7 @@ import sys
 from redis import Redis
 from rq import Queue, SimpleWorker
 
-from services.common import settings
+from backend.common import settings
 
 
 def main():
@@ -32,7 +32,7 @@ def main():
     conn.ping()
     log.info("connected to %s, queue %r", settings.REDIS_URL, settings.QUEUE_NAME)
 
-    from services.worker.tasks import device_detail, resolve_device
+    from backend.worker.tasks import device_detail, resolve_device
     dev = resolve_device()
     log.info("device: %s", device_detail())
     if settings.DEVICE == "auto" and dev == "cpu":
@@ -41,7 +41,7 @@ def main():
                     "-f docker-compose.gpu.yml and check the host with: "
                     "docker run --rm --gpus all nvidia/cuda:12.8.0-base-ubuntu24.04 nvidia-smi")
 
-    from services.worker.tasks import checkpoint_present, publish_status
+    from backend.worker.tasks import checkpoint_present, publish_status
     if not settings.DRY_RUN:
         if not checkpoint_present():
             # Refuse to start rather than accept jobs it cannot serve. The
@@ -55,7 +55,7 @@ def main():
             sys.exit(2)
 
         # Pay the model load now, at boot, rather than on the first user's job.
-        from services.worker.tasks import get_segmenter
+        from backend.worker.tasks import get_segmenter
         log.info("loading the model...")
         get_segmenter()
         log.info("model ready on %s", dev)

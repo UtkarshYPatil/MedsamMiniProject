@@ -1,7 +1,7 @@
 """
 The API over real HTTP, with no Docker, no Postgres and no Redis.
 
-tests/test_services.py tests the modules. This file tests the ROUTES: status
+tests/test_backend.py tests the modules. This file tests the ROUTES: status
 codes, payload shapes and the request-level guards. Those only exist in the
 wiring, so a module test cannot see them -- and the wiring is exactly what
 broke in this project before (an endpoint handing the browser a URL only
@@ -18,7 +18,7 @@ import io
 import numpy as np
 import pytest
 
-_NEED = "pip install -r services/requirements-dev.txt"
+_NEED = "pip install -r backend/requirements-dev.txt"
 fakeredis = pytest.importorskip("fakeredis", reason=_NEED)
 pytest.importorskip("httpx", reason=_NEED)
 pytest.importorskip("fastapi", reason=_NEED)
@@ -38,20 +38,20 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("DEVICE", "cpu")
     monkeypatch.setenv("MAX_UPLOAD_MB", "1")        # keep the cap test cheap
 
-    from services.common import settings, store
+    from backend.common import settings, store
     importlib.reload(settings)
     importlib.reload(store)
 
-    from services.api import db
+    from backend.api import db
     importlib.reload(db)
 
     # RQ must not reach a real Redis. Jobs are enqueued but never run; the
-    # worker task itself is covered in tests/test_services.py.
+    # worker task itself is covered in tests/test_backend.py.
     import redis
     monkeypatch.setattr(redis.Redis, "from_url",
                         classmethod(lambda cls, *a, **k: fakeredis.FakeStrictRedis()))
 
-    from services.api import main
+    from backend.api import main
     importlib.reload(main)
 
     with TestClient(main.app) as c:
@@ -243,8 +243,8 @@ def test_healthz_passes_through_what_the_worker_published(client):
     while the worker was running on a GPU.
     """
     import json
-    from services.api import main
-    from services.worker import tasks
+    from backend.api import main
+    from backend.worker import tasks
 
     main._redis.set(tasks.STATUS_KEY, json.dumps({
         "device": "cuda",
@@ -263,8 +263,8 @@ def test_healthz_passes_through_what_the_worker_published(client):
 
 
 def test_healthz_survives_a_corrupt_status_key(client):
-    from services.api import main
-    from services.worker import tasks
+    from backend.api import main
+    from backend.worker import tasks
     main._redis.set(tasks.STATUS_KEY, b"{not json")
 
     r = client.get("/healthz")
@@ -325,11 +325,11 @@ def test_suggest_refuses_to_guess_on_a_whole_series(client, monkeypatch):
     no box at all.
     """
     import numpy as np
-    from services.common import store
+    from backend.common import store
 
     big = np.full((60, 256, 256), -800, dtype=np.int16)
     case_id = store.save_case(big, (1.0, 0.7, 0.7), source="dicom")
-    from services.api import db as dbmod
+    from backend.api import db as dbmod
     with dbmod.SessionLocal() as sess:
         sess.add(dbmod.Case(id=case_id, source="dicom", note="test",
                             shape_z=60, shape_y=256, shape_x=256,

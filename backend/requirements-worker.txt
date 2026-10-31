@@ -10,7 +10,7 @@
 #   density.solid_component   -> from scipy.ndimage import binary_erosion
 #   medsam2.largest_component -> from skimage import measure
 #
-# tests/test_services.py::test_worker_requirements_cover_src_imports now checks
+# tests/test_backend.py::test_worker_requirements_cover_src_imports now checks
 # this list against every import in src/, so the next lazy import cannot slip
 # through the same way.
 #

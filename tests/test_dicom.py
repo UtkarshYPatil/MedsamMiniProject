@@ -15,8 +15,8 @@ import pytest
 
 pydicom = pytest.importorskip("pydicom", reason="pip install pydicom")
 
-from services.common import dicomseries as D
-from services.common import roi
+from backend.common import dicomseries as D
+from backend.common import roi
 
 
 # ----------------------------------------------------------------- fixtures

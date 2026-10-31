@@ -36,3 +36,7 @@ venv/
 
 # archived supersededscripts
 _archive/
+
+# Local runtime config. .env.example is the tracked template.
+# This was committed once, with POSTGRES_PASSWORD in it.
+.env

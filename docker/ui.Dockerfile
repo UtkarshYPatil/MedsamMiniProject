@@ -9,11 +9,10 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-COPY services/requirements-ui.txt /tmp/req.txt
+COPY frontend/requirements.txt /tmp/req.txt
 RUN pip install --no-cache-dir -r /tmp/req.txt
 
-COPY services/ui/      /app/services/ui/
-COPY services/__init__.py /app/services/__init__.py
+COPY frontend/      /app/frontend/
 
 RUN useradd --create-home --uid 10001 app && chown -R app:app /app
 USER app
@@ -23,5 +22,5 @@ HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=5 \
     CMD python -c "import urllib.request,sys; \
 sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health',timeout=3).status==200 else 1)"
 
-CMD ["streamlit", "run", "services/ui/app.py", \
+CMD ["streamlit", "run", "frontend/app.py", \
      "--server.port=8501", "--server.address=0.0.0.0"]

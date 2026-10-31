@@ -64,7 +64,7 @@ MODEL_CFG = os.environ.get("MODEL_CFG", "configs/sam2.1_hiera_t512.yaml")
 # back to CPU when it is not, so the same image runs on a laptop without a card
 # and on a GPU host without changing anything. Only the worker can resolve this
 # -- the api and ui containers have no torch, which is deliberate -- so
-# services.worker.tasks.resolve_device() does the work and reports what it
+# backend.worker.tasks.resolve_device() does the work and reports what it
 # picked in every job result.
 DEVICE = os.environ.get("DEVICE", "auto").strip().lower()
 

@@ -11,7 +11,7 @@ import uuid
 
 import numpy as np
 
-from services.common import settings
+from backend.common import settings
 
 
 def new_id() -> str:

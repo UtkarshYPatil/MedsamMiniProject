@@ -91,32 +91,63 @@ image or find a single nodule.
 
 ## Layout
 
+Two deployables, split at the top level. The frontend speaks only HTTP; it has
+no model, no torch, and no import from the backend.
+
 ```
-configs/config.yaml     paths, window, ROI size, thresholds
-external/MedSAM2/       vendored upstream model code
-src/compat.py           pylidc shims for modern Python/NumPy
-src/data/               LIDC parsing, HU windowing, ROI cropping
-src/prompts/            box from mask (dev) or from click (tool)
-src/models/medsam2.py   frozen MedSAM2 wrapper + dummy segmenter
-src/evaluate/metrics.py Dice, IoU, HD95, volume, diameter, HU stats
-src/report/density.py   HU profile + provisional density class
-src/report/sizing.py    measurement summary + confidence flags
-scripts/                00 verify → 01 setup → 02 prepare → 04 sanity
-                        → 03 baseline → 05 calibrate
-app/app.py              Streamlit tool (single process, local)
-services/               Phase 3 service stack
-  common/               env settings, case storage, PNG rendering, phantom
-  api/                  FastAPI: upload, enqueue, poll, overlay
-  worker/               RQ worker; the only process that loads the model
-  ui/                   Streamlit client, talks only to the API
-docker/                 one Dockerfile per service (+ a CUDA worker variant)
-docker-compose.yml      full stack, CPU, runs anywhere
-docker-compose.gpu.yml  overlay: swaps the worker onto CUDA
-tests/                  43 unit tests (28 research + 15 service)
-docs/hld.md             high-level design
-docs/model_card.md      model version, metrics, limitations
-docs/phase3_deployment.md  running, scaling and hosting the stack
+frontend/                   what the radiologist sees
+  app.py                    Streamlit client -- talks to the API and nothing else
+  requirements.txt          streamlit + requests. No torch, by design.
+
+backend/                    everything behind the HTTP boundary
+  common/                   shared by api and worker
+    settings.py             env config; ROI geometry; the worker-status key
+    store.py                case + mask storage, PNG rendering, phantom
+    autoprompt.py           proposes a prompt box inside an ROI
+    dicomseries.py          DICOM series -> (Z, Y, X) HU volume
+    roi.py                  crop a full series to the validated 128x128x33
+  api/                      FastAPI: upload, enqueue, poll, overlay. No torch.
+    main.py                 routes
+    db.py                   Postgres models (cases, jobs)
+  worker/                   the ONLY process that loads the model
+    run.py                  entry point; fails fast without a checkpoint
+    tasks.py                segment + measure; device resolution
+  requirements-api.txt      api image deps
+  requirements-worker.txt   worker image deps (torch lives here)
+  requirements-dev.txt      test-only deps
+
+src/                        research code, shared with the worker
+  compat.py                 pylidc shims for modern Python/NumPy
+  data/                     LIDC parsing, HU windowing, ROI cropping
+  prompts/                  box from mask (research) or from a click (tool)
+  models/medsam2.py         frozen MedSAM2 wrapper + dummy segmenter
+  evaluate/metrics.py       Dice, IoU, HD95, volume, diameter, HU stats
+  report/density.py         HU profile + provisional density class
+  report/sizing.py          measurement summary + confidence flags
+
+scripts/                    00 verify -> 01 setup -> 02 prepare -> 04 sanity
+                            -> 03 baseline -> 05 calibrate -> 06 ablate
+                            09 inter-reader ceiling, 10 preflight,
+                            11 auto-prompt vs consensus,
+                            12 service vs baseline
+app/app.py                  the original single-process Streamlit tool
+docker/                     one Dockerfile per image (+ a CUDA worker variant)
+docker-compose.yml          full stack, CPU, runs anywhere
+docker-compose.gpu.yml      overlay: swaps the worker onto CUDA
+docker-compose.pull.yml     standalone: pulls prebuilt images, no repo needed
+tests/                      120 tests
+  test_backend.py           modules: storage, worker task, ROI, flags, config
+  test_api_http.py          routes over real HTTP (SQLite + fakeredis)
+  test_dicom.py             DICOM import and the ROI crop
+configs/config.yaml         paths, window, ROI size, thresholds
+external/MedSAM2/           vendored upstream model code
+docs/                       hld, model card, deployment
 ```
+
+Why the split is where it is: the worker is the only container that needs
+torch and the 156 MB checkpoint, so it is the only large image. The API moves
+bytes and rows. The frontend renders. Scaling means running more workers
+(`docker compose up --scale worker=4`); nothing else changes.
 
 ## Run the full stack
 

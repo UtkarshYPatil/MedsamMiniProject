@@ -22,7 +22,7 @@ wrong, and three of them are silent when they are wrong:
    We measure it from consecutive positions and fall back to SliceThickness.
 
 4. AXIS ORDER. pixel_array is (rows, cols) = (Y, X). Stacking gives (Z, Y, X),
-   which is what src/ and services/ use throughout. PixelSpacing is
+   which is what src/ and backend/ use throughout. PixelSpacing is
    [row, col] = [y, x], so spacing is (dz, PixelSpacing[0], PixelSpacing[1]).
    Getting this backwards on a non-isotropic scan is a silent error -- the
    image still looks like a chest.

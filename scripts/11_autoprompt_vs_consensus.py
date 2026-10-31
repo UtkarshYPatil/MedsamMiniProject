@@ -55,7 +55,7 @@ from src.prompts.bbox import bbox_from_mask, best_slice
 from src.models.medsam2 import build
 from src.evaluate import metrics as M
 from src.report.sizing import summarize, as_dict
-from services.common import autoprompt
+from backend.common import autoprompt
 
 
 def box_area(b):

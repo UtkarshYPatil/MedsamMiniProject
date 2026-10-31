@@ -1,7 +1,7 @@
 """
 Radiologist-facing client. Talks only to the API -- no model, no torch.
 
-    streamlit run services/ui/app.py
+    streamlit run frontend/app.py
 
 DESIGN RULES (carried over from app/app.py -- do not drift from these)
 1. The tool MEASURES. It never diagnoses, scores malignancy, or recommends a

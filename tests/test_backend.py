@@ -5,7 +5,7 @@ They cover the part of the stack most likely to break quietly: the storage
 round-trip, the PNG rendering the UI depends on, and the worker task end to
 end against the dummy segmenter.
 
-    python -m pytest tests/test_services.py -v
+    python -m pytest tests/test_backend.py -v
 """
 import os
 
@@ -23,9 +23,9 @@ def _isolated_data_dir(tmp_path, monkeypatch):
     # settings reads the environment at import time, so reload it and anything
     # holding a reference to it.
     import importlib
-    from services.common import settings as s
+    from backend.common import settings as s
     importlib.reload(s)
-    from services.common import store as st
+    from backend.common import store as st
     importlib.reload(st)
     yield
 
@@ -33,7 +33,7 @@ def _isolated_data_dir(tmp_path, monkeypatch):
 # ----------------------------------------------------------------- phantom
 
 def test_phantom_has_the_requested_geometry():
-    from services.common import store
+    from backend.common import store
     vol, spacing = store.make_phantom(diameter_mm=9.0)
 
     assert vol.shape == (33, 128, 128)
@@ -45,7 +45,7 @@ def test_phantom_has_the_requested_geometry():
 
 
 def test_phantom_diameter_scales():
-    from services.common import store
+    from backend.common import store
     small, sp = store.make_phantom(diameter_mm=5.0)
     large, _ = store.make_phantom(diameter_mm=20.0)
     # count voxels clearly above lung attenuation
@@ -55,7 +55,7 @@ def test_phantom_diameter_scales():
 # ----------------------------------------------------------------- storage
 
 def test_case_round_trip():
-    from services.common import store
+    from backend.common import store
     vol, spacing = store.make_phantom()
     case_id = store.save_case(vol, spacing, source="phantom")
 
@@ -66,13 +66,13 @@ def test_case_round_trip():
 
 
 def test_save_case_rejects_2d():
-    from services.common import store
+    from backend.common import store
     with pytest.raises(ValueError, match="3D"):
         store.save_case(np.zeros((64, 64), dtype=np.int16), (1, 1, 1))
 
 
 def test_read_npz_upload_accepts_prepare_data_format(tmp_path):
-    from services.common import store
+    from backend.common import store
     vol, spacing = store.make_phantom()
     p = tmp_path / "case.npz"
     np.savez_compressed(p, image_hu=vol, mask=np.zeros_like(vol, bool), spacing=spacing)
@@ -83,7 +83,7 @@ def test_read_npz_upload_accepts_prepare_data_format(tmp_path):
 
 
 def test_read_npz_upload_defaults_spacing_when_absent(tmp_path):
-    from services.common import store
+    from backend.common import store
     p = tmp_path / "nospacing.npz"
     np.savez_compressed(p, image_hu=np.zeros((5, 8, 8), dtype=np.int16))
     _, sp = store.read_npz_upload(p.read_bytes())
@@ -91,7 +91,7 @@ def test_read_npz_upload_defaults_spacing_when_absent(tmp_path):
 
 
 def test_read_npz_upload_explains_a_missing_image(tmp_path):
-    from services.common import store
+    from backend.common import store
     p = tmp_path / "wrong.npz"
     np.savez_compressed(p, something_else=np.zeros((4, 4)))
     with pytest.raises(ValueError, match="no image array"):
@@ -101,14 +101,14 @@ def test_read_npz_upload_explains_a_missing_image(tmp_path):
 # ---------------------------------------------------------------- rendering
 
 def test_render_png_is_a_png():
-    from services.common import store
+    from backend.common import store
     vol, _ = store.make_phantom()
     png = store.render_png(vol[16])
     assert png[:8] == b"\x89PNG\r\n\x1a\n"
 
 
 def test_render_png_with_mask_and_box_still_decodes():
-    from services.common import store
+    from backend.common import store
     vol, _ = store.make_phantom()
     mask = np.zeros(vol.shape[1:], dtype=bool)
     mask[60:68, 60:68] = True
@@ -122,7 +122,7 @@ def test_render_png_with_mask_and_box_still_decodes():
 
 
 def test_outline_is_the_border_only():
-    from services.common.store import _outline
+    from backend.common.store import _outline
     m = np.zeros((20, 20), dtype=bool)
     m[5:15, 5:15] = True           # 10x10 filled square
 
@@ -133,7 +133,7 @@ def test_outline_is_the_border_only():
 
 
 def test_outline_of_empty_mask_is_empty():
-    from services.common.store import _outline
+    from backend.common.store import _outline
     assert not _outline(np.zeros((8, 8), dtype=bool)).any()
 
 
@@ -146,8 +146,8 @@ def test_segment_case_end_to_end_with_the_dummy_model():
     DRY_RUN means the mask is meaningless, but every step that moves or shapes
     data is real, which is what this is checking.
     """
-    from services.common import store
-    from services.worker import tasks
+    from backend.common import store
+    from backend.worker import tasks
 
     vol, spacing = store.make_phantom(diameter_mm=10.0)
     case_id = store.save_case(vol, spacing, source="phantom")
@@ -169,8 +169,8 @@ def test_segment_case_end_to_end_with_the_dummy_model():
 
 
 def test_segment_case_rejects_a_slice_outside_the_volume():
-    from services.common import store
-    from services.worker import tasks
+    from backend.common import store
+    from backend.worker import tasks
 
     vol, spacing = store.make_phantom()
     case_id = store.save_case(vol, spacing)
@@ -180,7 +180,7 @@ def test_segment_case_rejects_a_slice_outside_the_volume():
 
 
 def test_segment_case_reports_a_missing_case():
-    from services.worker import tasks
+    from backend.worker import tasks
     with pytest.raises(FileNotFoundError):
         tasks.segment_case("deadbeefcafe", prompt_z=0, box=[1.0, 1.0, 9.0, 9.0])
 
@@ -199,7 +199,7 @@ def test_settings_never_use_the_windows_research_paths(monkeypatch):
     """
     import importlib
     monkeypatch.delenv("DATA_DIR", raising=False)
-    from services.common import settings as s
+    from backend.common import settings as s
     importlib.reload(s)
     try:
         assert str(s.DATA_DIR) in ("/data", "\\data"), \
@@ -256,12 +256,12 @@ def test_worker_requirements_cover_src_imports():
               and m not in from_base_image
               and m not in not_on_service_path}
 
-    declared = (root / "services" / "requirements-worker.txt").read_text(encoding="utf-8").lower()
+    declared = (root / "backend" / "requirements-worker.txt").read_text(encoding="utf-8").lower()
     missing = sorted(m for m in needed
                      if dist.get(m, m).lower() not in declared)
 
     assert not missing, (
-        f"src/ imports {missing} but services/requirements-worker.txt does not "
+        f"src/ imports {missing} but backend/requirements-worker.txt does not "
         f"declare them -- the worker container will fail at runtime. "
         f"Distribution names: {[dist.get(m, m) for m in missing]}")
 
@@ -272,9 +272,9 @@ def _fresh_tasks(monkeypatch, device):
     """Re-import the worker with DEVICE set, clearing the cached resolution."""
     import importlib
     monkeypatch.setenv("DEVICE", device)
-    from services.common import settings as s
+    from backend.common import settings as s
     importlib.reload(s)
-    from services.worker import tasks as t
+    from backend.worker import tasks as t
     importlib.reload(t)
     t._device = None
     return t
@@ -364,11 +364,11 @@ def test_every_module_imports():
     # were meant to be terminal and fails on a name that was never bound.
     # That is a fact about Streamlit, not a defect in the page, so these are
     # syntax-checked below instead.
-    ENTRY_POINTS = {"services/ui/app.py"}
+    ENTRY_POINTS = {"frontend/app.py"}
 
     root = pathlib.Path(__file__).resolve().parents[1]
     skipped, failed = [], []
-    for path in sorted(root.glob("src/**/*.py")) + sorted(root.glob("services/**/*.py")):
+    for path in sorted(root.glob("src/**/*.py")) + sorted(root.glob("backend/**/*.py")):
         if path.name == "__init__.py":
             continue
         if path.relative_to(root).as_posix() in ENTRY_POINTS:
@@ -403,7 +403,7 @@ def _slab_volume(shape=(33, 128, 128)):
 
 
 def test_suggest_box_finds_a_phantom_nodule():
-    from services.common import autoprompt, store
+    from backend.common import autoprompt, store
     vol, _ = store.make_phantom(diameter_mm=9.0)
 
     z, box, info = autoprompt.suggest_box(vol)
@@ -424,7 +424,7 @@ def test_suggest_box_refuses_a_volume_holding_only_chest_wall():
     wall. Every component touching the border is dropped, so when the wall is
     all there is, the answer must be "nothing plausible" rather than the wall.
     """
-    from services.common import autoprompt
+    from backend.common import autoprompt
     z, box, info = autoprompt.suggest_box(_slab_volume())
 
     assert z is None and box is None, \
@@ -434,7 +434,7 @@ def test_suggest_box_refuses_a_volume_holding_only_chest_wall():
 
 def test_suggest_box_prefers_a_nodule_over_a_larger_chest_wall():
     """The wall is far bigger. Size must not win against a border component."""
-    from services.common import autoprompt, store
+    from backend.common import autoprompt, store
     vol, _ = store.make_phantom(diameter_mm=8.0)
     vol = vol.copy()
     vol[:, :, :12] = 40                       # add a wall beside the nodule
@@ -452,7 +452,7 @@ def test_suggest_box_agrees_with_and_without_scipy(monkeypatch):
     scipy, the API and the worker would propose different boxes for the same
     case depending on which image answered.
     """
-    from services.common import autoprompt, store
+    from backend.common import autoprompt, store
     vol, _ = store.make_phantom(diameter_mm=9.0)
 
     with_scipy = autoprompt.suggest_box(vol)
@@ -464,7 +464,7 @@ def test_suggest_box_agrees_with_and_without_scipy(monkeypatch):
 
 
 def test_centred_fallback_stays_inside_the_volume():
-    from services.common import autoprompt
+    from backend.common import autoprompt
     z, box = autoprompt.centred_fallback((33, 64, 64), half=16)
     assert 0 <= z < 33
     assert box[0] >= 0 and box[1] >= 0 and box[2] <= 64 and box[3] <= 64
@@ -543,7 +543,7 @@ def test_flag_quality_survives_a_mask_without_indexing():
 
 def test_upload_cap_is_configurable_and_sane():
     import importlib
-    from services.common import settings as s
+    from backend.common import settings as s
     importlib.reload(s)
     assert 1 <= s.MAX_UPLOAD_MB <= 1024
     assert s.CORS_ORIGINS, "an empty origin list would reject every browser call"
@@ -553,7 +553,7 @@ def test_upload_cap_reads_the_environment(monkeypatch):
     import importlib
     monkeypatch.setenv("MAX_UPLOAD_MB", "7")
     monkeypatch.setenv("CORS_ORIGINS", "http://a.test, http://b.test")
-    from services.common import settings as s
+    from backend.common import settings as s
     importlib.reload(s)
     try:
         assert s.MAX_UPLOAD_MB == 7
@@ -566,7 +566,7 @@ def test_upload_cap_reads_the_environment(monkeypatch):
 def test_device_default_is_auto(monkeypatch):
     import importlib
     monkeypatch.delenv("DEVICE", raising=False)
-    from services.common import settings as s
+    from backend.common import settings as s
     importlib.reload(s)
     try:
         assert s.DEVICE == "auto", \
@@ -581,9 +581,9 @@ def test_device_default_is_auto(monkeypatch):
 def test_worker_status_reports_what_it_can_verify(monkeypatch):
     import importlib
     monkeypatch.setenv("CHECKPOINT", "/nonexistent/model.pt")
-    from services.common import settings as s
+    from backend.common import settings as s
     importlib.reload(s)
-    from services.worker import tasks
+    from backend.worker import tasks
     importlib.reload(tasks)
     try:
         st = tasks.worker_status()
@@ -602,9 +602,9 @@ def test_checkpoint_present_detects_a_real_file(tmp_path, monkeypatch):
     ckpt = tmp_path / "model.pt"
     ckpt.write_bytes(b"not a real checkpoint, but it exists")
     monkeypatch.setenv("CHECKPOINT", str(ckpt))
-    from services.common import settings as s
+    from backend.common import settings as s
     importlib.reload(s)
-    from services.worker import tasks
+    from backend.worker import tasks
     importlib.reload(tasks)
     try:
         assert tasks.checkpoint_present() is True
@@ -621,9 +621,9 @@ def test_publish_status_never_raises_without_redis(monkeypatch):
     """
     import importlib
     monkeypatch.setenv("REDIS_URL", "redis://127.0.0.1:1/0")   # nothing there
-    from services.common import settings as s
+    from backend.common import settings as s
     importlib.reload(s)
-    from services.worker import tasks
+    from backend.worker import tasks
     importlib.reload(tasks)
     try:
         st = tasks.publish_status()          # must not raise
@@ -640,15 +640,15 @@ def test_the_worker_status_key_has_one_definition():
     rename stops the API from ever seeing a worker again and raises nothing.
     """
     import pathlib
-    from services.common import settings
-    from services.worker import tasks
+    from backend.common import settings
+    from backend.worker import tasks
 
     assert tasks.STATUS_KEY == settings.WORKER_STATUS_KEY
 
     root = pathlib.Path(__file__).resolve().parents[1]
     literal = settings.WORKER_STATUS_KEY
     offenders = []
-    for path in sorted(root.glob("services/**/*.py")):
+    for path in sorted(root.glob("backend/**/*.py")):
         if path.name == "settings.py":
             continue                 # the one place it is allowed to be spelt
         text = path.read_text(encoding="utf-8")
@@ -664,7 +664,7 @@ def test_text_files_are_read_as_utf8():
     read_text() with no encoding uses the LOCALE encoding, which is cp1252 on
     a default Windows install and UTF-8 on Linux. Code written on Linux reads
     fine there and crashes on Windows the moment a file contains an em dash or
-    an emoji -- which services/ui/app.py does, in its banner icons.
+    an emoji -- which frontend/app.py does, in its banner icons.
 
     Three of this project's files were read that way. The fix is cheap and the
     bug is invisible until someone runs it on the other platform, so the rule
@@ -677,7 +677,7 @@ def test_text_files_are_read_as_utf8():
     bad = []
     pattern = re.compile(r"\.(read_text|write_text)\(|(?<![\w.])open\(")
 
-    for path in (sorted(root.glob("src/**/*.py")) + sorted(root.glob("services/**/*.py"))
+    for path in (sorted(root.glob("src/**/*.py")) + sorted(root.glob("backend/**/*.py"))
                  + sorted(root.glob("scripts/**/*.py")) + sorted(root.glob("tests/**/*.py"))):
         for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if not pattern.search(line):
@@ -756,8 +756,8 @@ def test_segment_case_crops_a_full_series_to_the_roi(monkeypatch, tmp_path):
     the overlay and the measurements agree with the prompt the caller gave.
     """
     import numpy as np
-    from services.common import store
-    from services.worker import tasks
+    from backend.common import store
+    from backend.worker import tasks
 
     vol = np.full((80, 300, 300), -900, dtype=np.int16)
     vol[40, 150, 150] = 60                      # something to find
@@ -795,8 +795,8 @@ def test_segment_case_crops_a_full_series_to_the_roi(monkeypatch, tmp_path):
 def test_segment_case_leaves_an_roi_sized_case_uncropped(monkeypatch):
     """The existing .npz path must not start going through the crop."""
     import numpy as np
-    from services.common import store
-    from services.worker import tasks
+    from backend.common import store
+    from backend.worker import tasks
 
     vol, spacing = store.make_phantom(diameter_mm=9.0)
     assert vol.shape == (33, 128, 128)

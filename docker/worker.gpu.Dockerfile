@@ -18,7 +18,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends git \
  && rm -rf /var/lib/apt/lists/*
 
-COPY services/requirements-worker.txt /tmp/req.txt
+COPY backend/requirements-worker.txt /tmp/req.txt
 RUN pip install --no-cache-dir -r /tmp/req.txt
 
 ARG MEDSAM2_REF=main
@@ -28,7 +28,7 @@ RUN git clone --depth 1 --branch "${MEDSAM2_REF}" \
 
 COPY src/      /app/src/
 COPY configs/  /app/configs/
-COPY services/ /app/services/
+COPY backend/ /app/backend/
 
 VOLUME ["/app/checkpoints"]
 
@@ -47,4 +47,4 @@ RUN useradd --create-home --uid 10001 app \
  && chown -R app:app /app /data
 USER app
 
-CMD ["python", "-m", "services.worker.run"]
+CMD ["python", "-m", "backend.worker.run"]

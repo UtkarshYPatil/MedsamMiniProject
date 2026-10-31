@@ -10,7 +10,7 @@ from sqlalchemy import (JSON, Boolean, DateTime, Float, ForeignKey, Integer,
                         String, create_engine)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
-from services.common import settings
+from backend.common import settings
 
 engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True, future=True)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)

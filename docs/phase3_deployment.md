@@ -94,7 +94,7 @@ reserved. On Windows this works through Docker Desktop with the WSL2 backend.
 ## Tests
 
 ```bash
-pip install -r services/requirements-dev.txt
+pip install -r backend/requirements-dev.txt
 python -m pytest tests/ -q
 ```
 
@@ -205,7 +205,7 @@ the recipient is on an M-series Mac, have them use the repo and build locally.
 as the first tab under "Add a case".
 
 Four things have to be right or every millimetre afterwards is wrong, and three
-of them fail silently. `services/common/dicomseries.py` handles each, and
+of them fail silently. `backend/common/dicomseries.py` handles each, and
 `tests/test_dicom.py` tests each against a synthetic series:
 
 | | what goes wrong if skipped |

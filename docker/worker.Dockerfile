@@ -20,7 +20,7 @@ RUN apt-get update \
 RUN pip install --no-cache-dir torch torchvision \
       --index-url https://download.pytorch.org/whl/cpu
 
-COPY services/requirements-worker.txt /tmp/req.txt
+COPY backend/requirements-worker.txt /tmp/req.txt
 RUN pip install --no-cache-dir -r /tmp/req.txt
 
 # sam2 comes from the MedSAM2 repo, which is gitignored and so not in the
@@ -33,7 +33,7 @@ RUN git clone --depth 1 --branch "${MEDSAM2_REF}" \
 
 COPY src/      /app/src/
 COPY configs/  /app/configs/
-COPY services/ /app/services/
+COPY backend/ /app/backend/
 
 # Model weights are NOT baked in. They are mounted at /app/checkpoints.
 # MedSAM2's weights are research-and-education-use only, so redistributing
@@ -45,4 +45,4 @@ RUN useradd --create-home --uid 10001 app \
  && chown -R app:app /app /data
 USER app
 
-CMD ["python", "-m", "services.worker.run"]
+CMD ["python", "-m", "backend.worker.run"]

@@ -7,10 +7,10 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-COPY services/requirements-api.txt /tmp/req.txt
+COPY backend/requirements-api.txt /tmp/req.txt
 RUN pip install --no-cache-dir -r /tmp/req.txt
 
-COPY services/ /app/services/
+COPY backend/ /app/backend/
 
 # A non-root user, because the data volume is writable and this container is
 # the one exposed to the network.
@@ -24,4 +24,4 @@ HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=5 \
     CMD python -c "import urllib.request,sys; \
 sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz',timeout=3).status==200 else 1)"
 
-CMD ["uvicorn", "services.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "backend.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
