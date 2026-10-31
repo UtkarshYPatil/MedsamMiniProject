@@ -42,20 +42,20 @@ decision. The output is a measurement, not a finding.
 |---|---|
 | Dataset | LIDC-IDRI |
 | Reference | 50% consensus of up to 4 radiologist contours (pylidc) |
-| Scans processed | `FILL` |
-| Nodules evaluated | `FILL` |
+| Scans processed | 296 |
+| Nodules evaluated | 902 |
 | Split | by patient |
-| Hardware | `FILL` |
+| Hardware | NVIDIA RTX 4060 Laptop GPU (CUDA 12.8) |
 | Seed | 42 |
-| Commit | `FILL` |
+| Commit | `28ee7d7` |
 
 ### Segmentation quality
 
 | Metric | Mean | Std | Median |
 |---|---|---|---|
-| Dice | `FILL` | `FILL` | `FILL` |
-| IoU | `FILL` | `FILL` | `FILL` |
-| HD95 (mm) | `FILL` | `FILL` | `FILL` |
+| Dice | 0.766 | 0.142 | 0.800 |
+| IoU | 0.640 | 0.165 | 0.667 |
+| HD95 (mm) | 2.760 | 4.099 | 1.250 |
 
 ### By reader texture class
 
@@ -63,33 +63,62 @@ Ground-glass and part-solid are expected to score lowest — faint boundaries.
 
 | Texture | n | Dice mean | Dice std |
 |---|---|---|---|
-| Solid | `FILL` | `FILL` | `FILL` |
-| Part-solid | `FILL` | `FILL` | `FILL` |
-| Ground-glass | `FILL` | `FILL` | `FILL` |
+| Solid | 767 | 0.776 | 0.139 |
+| Part-solid | 43 | 0.779 | 0.093 |
+| Ground-glass | 92 | 0.679 | 0.159 |
 
 ### Measurement agreement
 
 | | |
 |---|---|
-| Diameter error, mean | `FILL` mm |
-| Diameter error, abs mean | `FILL` mm |
-| Within 1 mm of reference | `FILL` % |
+| Diameter error, mean | −0.01 mm |
+| Diameter error, abs mean | 0.55 mm |
+| Within 1 mm of reference | 92 % |
+
+### Accuracy tracks reader agreement
+
+The reference is a 50% consensus, so a nodule marked by one radiologist has a
+weaker reference than one all four agreed on. Dice follows that exactly:
+
+| Readers who marked it | n | Dice mean |
+|---|---|---|
+| 1 | 262 | 0.692 |
+| 2 | 175 | 0.742 |
+| 3 | 163 | 0.790 |
+| 4 | 299 | 0.834 |
+
+The gradient held from n=137 to n=902 unchanged in shape. Quote 0.766 as the
+headline, but 0.834 is the figure on nodules where the reference is strongest,
+and the spread is a property of the reference as much as of the model.
+
+### The dominant failure mode: over-segmentation along Z
+
+Mean diameter is essentially unbiased (−0.01 mm, 92% within 1 mm) while volume
+runs 12% high at the median and 90% high at p90. Those two facts together
+locate the error: diameter is in-plane, volume is area × depth, so the excess
+is on slices where the nodule has ended. Volume ratio correlates −0.65 with
+Dice; diameter ratio only −0.26. MedSAM2's propagation continues past the end
+of the nodule.
+
+**Report diameter with confidence. Qualify volume.**
 
 ### Latency
 
 | | |
 |---|---|
-| Seconds per nodule (mean) | `FILL` |
+| Seconds per nodule (mean) | 1.67 (GPU, including I/O) |
 
 ## Limitations
 
 1. **Prompts are not automatic.** The bounding box is derived from the
    reference mask, so these figures measure *segmentation quality given a
    correct box*, not end-to-end detection. Automatic detection is Phase 3.
-2. **Density classification is unvalidated** — 60% agreement with reader
-   texture ratings on 30 nodules, with every error on a reader-rated solid
-   nodule that attenuates like ground glass. Reported as provisional; the tool
-   shows HU statistics instead. See `docs/hld.md` §7.
+2. **Density classification does not work and is not reported.** On 902
+   nodules it agrees with reader texture 51% of the time. Answering "solid"
+   every time would agree 85% of the time, so it is 34 points worse than a
+   constant. The earlier "60% on 30 nodules" was a small sample flattering a
+   classifier that has no signal. The tool now shows the HU statistics it was
+   derived from — those are real measurements — and withholds the label.
 3. **Expected to perform worst on ground-glass and part-solid nodules.**
    Both are confidence-flagged by default.
 4. **The reference is a construct** — up to 4 readers disagree; the 50%

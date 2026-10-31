@@ -81,6 +81,11 @@ def classify(vol_hu, mask, solid_hu=SOLID_HU):
     Returns (label, evidence).
 
     label is one of solid / part_solid / ground_glass / unknown and is
+    DO NOT USE THIS LABEL. Measured on 902 nodules it agrees with LIDC reader
+    texture 51% of the time, while answering "solid" every time would agree
+    85% of the time -- it is 34 points WORSE than a constant. The HU figures
+    it returns alongside are real measurements and are fine; the class is not.
+
     PROVISIONAL. evidence["calibrated"] is False until the thresholds have been
     fitted on a class-balanced sample. Callers must surface that.
     """

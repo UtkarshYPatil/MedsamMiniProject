@@ -23,21 +23,30 @@ near the edge of the crop produced a 3185 mm3 "nodule" of 17.4 x 30.8 mm with
 HIGH confidence and no flags, 43x the reference volume. Every geometric check
 passed, because the mask was large, solid and spanned many slices.
 
-Measured on the 137-nodule set, diameter_max / diameter_mean runs 1.02 to 1.55
-(median 1.16, p95 1.38) and that chest-wall mask sat at 1.77 -- no real nodule
-reached it. Elongation separates them; volume does not (14 real nodules exceed
-3185 mm3) and core attenuation does not (47 of 137 exceed 0 HU, one calcified
-nodule reaching +1271).
+On the 137-nodule set, diameter_max / diameter_mean ran 1.02 to 1.55 against
+that chest-wall mask's 1.77, so nothing real reached the threshold. At 902
+nodules the separation is no longer clean: the median is still 1.16 and p95
+1.41, but the maximum is 2.47 and 9 real nodules (1.0%) now cross 1.6.
+
+So this is a heuristic that costs 1% of cases a downgrade to LOW, not a
+discriminator. It is kept because that is the right trade -- it lowers
+confidence rather than refusing to report, and the failure it catches
+produced a 43x volume error at HIGH confidence with no other check firing.
+Volume does not catch that case (14 real nodules exceed 3185 mm3) and core
+attenuation does not (47 of 137 exceeded 0 HU, one calcified nodule at
++1271).
 """
 from dataclasses import dataclass, asdict, field
 
 from src.evaluate.metrics import measure, mean_diameter_mm
 from src.report.density import classify, solid_component_mask, hu_profile
 
-# Above the observed maximum of 1.55 on 137 nodules, below the 1.77 of the
-# known chest-wall failure. A heuristic on one dataset, so it lowers
-# confidence rather than refusing to report: a spiculated nodule, or one
-# merged with a vessel, could legitimately be this elongated.
+# Set above the maximum observed on 137 nodules (1.55) and below the 1.77 of
+# the known chest-wall failure. At 902 nodules 9 real nodules (1.0%) exceed
+# it, so it is a heuristic with a known false-positive rate, not a clean
+# separator -- which is why it lowers confidence rather than refusing to
+# report. A spiculated nodule, or one merged with a vessel, is legitimately
+# this elongated.
 ELONGATION_MAX = 1.6
 
 

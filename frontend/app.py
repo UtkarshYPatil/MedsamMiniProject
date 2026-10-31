@@ -342,10 +342,20 @@ with right:
                    f"— the geometry the published accuracy figures were "
                    f"measured on, not the whole series.")
 
-    if res.get("density_class") and not res.get("density_calibrated", False):
-        st.caption(f"Density reads as **{res['density_class']}**, but the density "
-                   "classifier is not calibrated — treat it as provisional and "
-                   "read the HU values instead.")
+    # The density CLASS is not shown. On 902 nodules it agrees with reader
+    # texture 51% of the time, against 85% for answering "solid" every time --
+    # worse than a constant, so putting it on screen beside real measurements
+    # would lend it credibility it has not earned. The HU statistics it is
+    # derived from are genuine measurements, so those are shown instead.
+    m = res.get("measurement", {})
+    if m.get("core_hu_p50") is not None:
+        st.caption(
+            f"Core attenuation **{m['core_hu_p50']:.0f} HU** "
+            f"(p90 {m.get('hu_p90', float('nan')):.0f}, "
+            f"solid fraction {m.get('core_solid_fraction', float('nan')):.2f}). "
+            "Density class is not reported: on 902 nodules it is less accurate "
+            "than always answering 'solid', so read the HU."
+        )
 
     with st.expander("All measured values"):
         st.json(res.get("measurement", {}))
