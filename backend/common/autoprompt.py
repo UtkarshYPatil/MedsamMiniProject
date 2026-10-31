@@ -28,6 +28,28 @@ HOW IT WORKS
 4. Return the tight box on that component's largest-area slice, with no
    padding -- scripts/06_ablate.py showed Dice falling 0.804 -> 0.266 as
    padding grows from 0 to 10 px.
+
+MEASURED PERFORMANCE -- READ THIS BEFORE TRUSTING IT
+----------------------------------------------------
+On 100 real LIDC ROIs (scripts/11_autoprompt_vs_consensus.py):
+
+    Dice with the consensus box : 0.806
+    Dice with THIS box          : 0.216   (median 0.000)
+    box missed the nodule       : 71%
+    box area vs consensus       : 0.26 median
+
+When the box does land on the nodule, Dice is 0.716 -- the segmentation is
+fine. The failure is localisation, and it gets WORSE with nodule size: 46%
+success at 4-6 mm, 13% above 8 mm.
+
+The cause is the border-component rejection below. In a 128x128 crop a large
+nodule, or one attached to a vessel that runs off the edge, touches the
+border and is discarded -- so the scorer falls through to a small vessel.
+That rule was validated on a synthetic isolated sphere and a synthetic
+chest-wall slab. Neither can exhibit this failure, which is why it shipped.
+
+Do not present this as a finding to a radiologist. The UI shows it as a
+starting point to be checked.
 """
 import numpy as np
 

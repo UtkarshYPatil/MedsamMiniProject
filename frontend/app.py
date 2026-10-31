@@ -221,10 +221,16 @@ with left:
                 "below on it, then press Segment. The tool measures what you "
                 "point it at — it does not detect nodules.", icon="🔎")
     elif found:
-        st.success(f"Found a likely nodule on **slice {auto_z}** "
-                   f"({suggestion['info'].get('voxels', '?')} voxels, spanning "
-                   f"{suggestion['info'].get('slices_spanned', '?')} slices). "
-                   f"Press Segment.", icon="✅")
+        # Measured on 100 real ROIs: the auto box lands on the wrong object
+        # 71% of the time (Dice 0.216 against 0.806 with a correct box). It
+        # was validated on a synthetic sphere, which cannot show the failure.
+        # So it is offered as a starting point, not announced as a find.
+        st.warning(
+            f"Suggested box on **slice {auto_z}** — **check it before "
+            f"segmenting.** On real scans this suggestion lands on the wrong "
+            f"object about 70% of the time, usually a vessel rather than the "
+            f"nodule, and most often when the nodule is large. Adjust it "
+            f"below if it is not on the lesion.", icon="⚠️")
     else:
         st.warning("No likely nodule found automatically, so the box below is "
                    "just centred. Check it before segmenting.", icon="⚠️")
@@ -246,7 +252,7 @@ with left:
     else:
         prompt_z, box = auto_z, auto_box
 
-        with st.expander("Adjust the prompt"):
+        with st.expander("Adjust the prompt", expanded=True):
             st.caption(
                 "The automatic box assumes the nodule is near the middle of the "
                 "crop and ignores anything touching the edge, which is where the "
