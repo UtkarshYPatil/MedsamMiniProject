@@ -376,7 +376,31 @@ el.draw.addEventListener("pointerup", () => {
     boxLabel();
   }
   el.run.disabled = !state.box;
+  warnIfLoose();
 });
+
+/* The commonest way to get a nonsense measurement is a box drawn around the
+   region rather than the lesion: MedSAM2 segments the largest structure
+   inside the prompt, so a box covering half the crop comes back with lung or
+   chest wall and a core attenuation near -850 HU. The baseline Dice of 0.766
+   was measured with boxes drawn tight to the reference contour, so a loose
+   box is not merely worse, it is outside what the number describes. */
+const LOOSE_FRACTION = 0.35;
+
+function warnIfLoose() {
+  if (!state.box || !state.shape) return;
+  const [, H, W] = state.shape;
+  const [x0, y0, x1, y1] = state.box;
+  const covered = ((x1 - x0) * (y1 - y0)) / (H * W);
+  if (covered > LOOSE_FRACTION) {
+    alert_(`That box covers ${Math.round(covered * 100)}% of the crop. The ` +
+           "model segments the largest structure inside it, so a box this " +
+           "loose usually returns lung or chest wall rather than the nodule. " +
+           "Draw it tight around the lesion.", "warn");
+  } else {
+    clearAlerts();
+  }
+}
 
 el.z.addEventListener("input", () => {
   setSlice(Number(el.z.value));

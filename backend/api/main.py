@@ -262,6 +262,12 @@ def get_case(case_id: str, db: Session = Depends(get_db)):
     return row.as_dict()
 
 
+# Below this, a proposed box cannot produce a number the tool would stand
+# behind: sizing already flags anything under 4 mm as partial-volume
+# dominated, so proposing one is arming a button that cannot succeed.
+MIN_PROMPT_MM = 4.0
+
+
 @app.get("/api/cases/{case_id}/suggest")
 def suggest_prompt(case_id: str, db: Session = Depends(get_db)):
     """
@@ -299,9 +305,29 @@ def suggest_prompt(case_id: str, db: Session = Depends(get_db)):
             },
         }
 
+    _, spacing = store.load_case(case_id)
     z, box, info = autoprompt.suggest_box(vol)
+
+    # A winning component can clear the voxel floor and still be a speck in
+    # plane -- one case proposed a 0.7 x 2.1 mm box, which is below the size
+    # this tool will report a measurement for at all. Offering it would arm
+    # the Measure button with a prompt that cannot produce a usable number,
+    # so it is rejected in favour of the centred box.
+    if box is not None:
+        w_mm = (box[2] - box[0]) * float(spacing[2])
+        h_mm = (box[3] - box[1]) * float(spacing[1])
+        if min(w_mm, h_mm) < MIN_PROMPT_MM:
+            info["rejected_box_mm"] = [round(w_mm, 1), round(h_mm, 1)]
+            info["reason"] = (f"best component measured {w_mm:.1f} x {h_mm:.1f} "
+                              f"mm, under the {MIN_PROMPT_MM} mm floor")
+            box = None
+
     if box is None:
         z, box = autoprompt.centred_fallback(vol.shape)
+        # Not a detection. These ROIs are cut around a nodule centroid, so the
+        # middle of the crop is where the nodule is BY CONSTRUCTION -- which
+        # makes a centred box a fair starting point here and meaningless on a
+        # whole series, where this branch is never reached.
         return {"slice": z, "box": box, "source": "centred_fallback", "info": info}
     return {"slice": z, "box": box, "source": "auto", "info": info}
 

@@ -375,3 +375,31 @@ def test_healthz_trusts_the_heartbeat_not_rqs_registry(client):
         "a heartbeat is present, so the API must report a live worker"
     assert body["workers_alive"] == 0, \
         "RQ's registry is still empty -- that is the whole point of the fix"
+
+
+def test_suggest_never_proposes_a_box_too_small_to_measure(client, monkeypatch):
+    """
+    Observed on a real case: the auto-prompt won with a component that cleared
+    the voxel floor but measured 0.7 x 2.1 mm in plane. Sizing already refuses
+    to trust anything under 4mm, so proposing it arms Measure with a prompt
+    that cannot produce a usable number. It must fall back instead.
+    """
+    from backend.api import main
+    from backend.common import autoprompt
+
+    case_id = client.post("/api/cases",
+                          files={"file": ("roi.npz", _npz(), "application/octet-stream")}
+                          ).json()["case_id"]
+
+    # a winning component one pixel wide, which is what the real failure was
+    monkeypatch.setattr(autoprompt, "suggest_box",
+                        lambda vol, **kw: (3, [60.0, 60.0, 61.0, 62.0], {"reason": "ok"}))
+
+    body = client.get(f"/api/cases/{case_id}/suggest").json()
+
+    assert body["source"] == "centred_fallback", \
+        "a sub-4mm proposal must be rejected, not offered"
+    assert body["box"] is not None, "rejecting it must still leave a usable starting box"
+    x0, y0, x1, y1 = body["box"]
+    assert (x1 - x0) >= 8 and (y1 - y0) >= 8, "the fallback must be big enough to prompt with"
+    assert "rejected_box_mm" in body["info"], "the rejection has to be inspectable"
