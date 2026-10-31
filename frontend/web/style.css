@@ -1,0 +1,299 @@
+/*
+  Nodule measurement — a reading-room instrument, not a dashboard.
+
+  WHY IT LOOKS LIKE THIS
+  Radiologists read in dim rooms on calibrated greyscale displays, because
+  low-contrast detail in lung parenchyma is invisible against a bright
+  surround. So the dark surface is the working environment, not a style, and
+  it sets the one rule everything else follows: THE IMAGE IS THE BRIGHTEST
+  THING ON SCREEN. Panels sit below it, chrome below that.
+
+  The accent is cool teal on purpose. The API renders its overlay in red (the
+  measurement) and yellow (your box). If the interface also used a warm
+  accent they would compete, and the two colours that carry clinical meaning
+  would stop being the only warm marks in view.
+
+  GESTALT, where each is doing a job rather than being named:
+    figure/ground  image brightest, panels darker, chrome darkest
+    common region  each panel is a bounded surface, not a floating card
+    proximity      the scrubber touches the image it drives; Measure sits
+                   under the box readout it acts on
+    similarity     every measurement shares one treatment, so they read as a
+                   set; the confidence badge is deliberately unlike them, so
+                   it reads as a different kind of statement
+    continuity     left to right is the task order: pick, place, read
+    closure        the box is drawn as four corner marks. The eye closes the
+                   rectangle, and what you see is a reticle rather than a
+                   border — which is what placing a measurement feels like.
+*/
+
+:root {
+  --void:   #0a0d10;
+  --panel:  #141a1f;
+  --raise:  #1b232a;
+  --line:   #263038;
+  --text:   #dde5ea;
+  --muted:  #7b8a95;
+  --signal: #35d0c0;
+
+  --high:   #3fb27f;
+  --medium: #d9a441;
+  --low:    #e0614e;
+
+  --pad: 1.25rem;
+  --r: 3px;                 /* instruments have small radii, not pills */
+}
+
+* { box-sizing: border-box; }
+
+html { color-scheme: dark; }
+
+body {
+  margin: 0;
+  background: var(--void);
+  color: var(--text);
+  font: 400 15px/1.5 "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.tabular { font-variant-numeric: tabular-nums; }
+
+.sr {
+  position: absolute; width: 1px; height: 1px;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- header */
+
+.bar {
+  display: flex; align-items: baseline; gap: 1rem;
+  padding: 0.85rem var(--pad);
+  border-bottom: 1px solid var(--line);
+}
+.bar h1 {
+  margin: 0; font-size: 0.95rem; font-weight: 600; letter-spacing: 0.01em;
+}
+.bar-state { margin-left: auto; display: flex; gap: 1rem; }
+
+.state { color: var(--muted); font-size: 0.8rem; }
+.state.live::before {
+  content: ""; display: inline-block;
+  width: 6px; height: 6px; margin-right: 0.45rem;
+  border-radius: 50%; background: var(--signal);
+  vertical-align: 0.1em;
+}
+.state.down { color: var(--low); }
+.state.down::before { background: var(--low); }
+
+.disclaimer {
+  margin: 0; padding: 0.6rem var(--pad);
+  border-bottom: 1px solid var(--line);
+  color: var(--muted); font-size: 0.78rem;
+}
+.disclaimer span { display: block; max-width: 92ch; }
+
+/* ---------------------------------------------------------------- alerts */
+
+#alerts:not(:empty) { padding: var(--pad) var(--pad) 0; }
+.alert {
+  padding: 0.7rem 0.9rem; margin-bottom: 0.6rem;
+  border-left: 2px solid var(--low);
+  background: color-mix(in srgb, var(--low) 12%, var(--panel));
+  font-size: 0.85rem;
+}
+.alert.warn {
+  border-color: var(--medium);
+  background: color-mix(in srgb, var(--medium) 12%, var(--panel));
+}
+
+/* ----------------------------------------------------------------- shell */
+
+main {
+  display: grid;
+  grid-template-columns: 15rem minmax(0, 1fr) 21rem;
+  gap: 1px;
+  background: var(--line);          /* the gap IS the hairline between panels */
+  height: calc(100vh - 7.6rem);
+}
+
+.read { overflow-y: auto; }
+.panel { background: var(--panel); padding: var(--pad); min-width: 0; }
+
+.panel h2 {
+  margin: 0 0 0.9rem; font-size: 0.78rem; font-weight: 600;
+  color: var(--muted); letter-spacing: 0.02em;
+}
+.panel h3 {
+  margin: 0 0 0.5rem; font-size: 0.78rem; font-weight: 500; color: var(--muted);
+}
+
+/* ------------------------------------------------------------------ rail */
+
+.cases { list-style: none; margin: 0 0 1.5rem; padding: 0; }
+.cases li { margin-bottom: 1px; }
+
+.case {
+  display: block; width: 100%; text-align: left;
+  padding: 0.55rem 0.65rem;
+  background: none; border: 0; border-left: 2px solid transparent;
+  color: var(--text); font: inherit; font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.case:hover { background: var(--raise); }
+.case[aria-current="true"] {
+  background: var(--raise); border-left-color: var(--signal);
+}
+.case small { display: block; color: var(--muted); font-size: 0.72rem; }
+
+.drop {
+  display: block; padding: 1.1rem 0.8rem; margin-bottom: 0.6rem;
+  border: 1px dashed var(--line); border-radius: var(--r);
+  text-align: center; cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+.drop:hover, .drop.over { border-color: var(--signal); background: var(--raise); }
+.drop-main { display: block; font-size: 0.85rem; }
+.drop-sub  { display: block; margin-top: 0.2rem; color: var(--muted); font-size: 0.72rem; }
+
+button { font: inherit; cursor: pointer; border-radius: var(--r); }
+
+.ghost {
+  width: 100%; padding: 0.5rem;
+  background: none; border: 1px solid var(--line); color: var(--muted);
+  font-size: 0.82rem;
+  transition: border-color 140ms ease, color 140ms ease;
+}
+.ghost:hover { border-color: var(--muted); color: var(--text); }
+
+/* ----------------------------------------------------------------- stage */
+
+.stage { display: flex; flex-direction: column; min-height: 0; }
+
+.viewport {
+  position: relative; flex: 1;
+  display: grid; place-items: center;
+  min-height: 20rem; padding: 0.75rem;
+  /* min-height:0 lets this flex child shrink, so the scrubber and Measure
+     stay on screen instead of being pushed below the fold. */
+  flex: 1; min-height: 0;
+  background: #000;                 /* the image's own ground */
+  border-radius: var(--r);
+  overflow: hidden;
+}
+.viewport img {
+  /* width:100% makes a 320px or 512px slice scale UP to fill the panel --
+     max-width alone never upscales. No object-fit: that would keep the
+     element box full-size while letterboxing the pixels inside it, and the
+     canvas maps pointer coordinates through this element's rect. */
+  display: block; width: 100%; height: auto; max-height: 100%;
+  image-rendering: auto; user-select: none;
+}
+.viewport canvas {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  cursor: crosshair;
+}
+
+.hint {
+  position: absolute; bottom: 0.7rem; left: 50%; translate: -50% 0;
+  margin: 0; padding: 0.3rem 0.7rem;
+  background: rgba(10, 13, 16, 0.82); border-radius: var(--r);
+  color: var(--muted); font-size: 0.78rem;
+  transition: opacity 200ms ease;
+}
+.hint[hidden] { display: block; opacity: 0; pointer-events: none; }
+
+/* Proximity: pinned to the image, not floated into a control column. */
+.scrub { display: flex; align-items: center; gap: 0.8rem; margin-top: 0.7rem; }
+.scrub input { flex: 1; accent-color: var(--signal); }
+.scrub output { color: var(--muted); font-size: 0.8rem; min-width: 7ch; text-align: right; }
+
+.act { display: flex; align-items: center; gap: 0.9rem; margin-top: 0.9rem; }
+
+.primary {
+  padding: 0.6rem 1.4rem;
+  background: var(--signal); border: 0; color: #06211e;
+  font-weight: 600; font-size: 0.88rem;
+  transition: filter 140ms ease, opacity 140ms ease;
+}
+.primary:hover:not(:disabled) { filter: brightness(1.08); }
+.primary:disabled { opacity: 0.35; cursor: not-allowed; }
+.primary.busy { animation: pulse 1.4s ease-in-out infinite; }
+
+@keyframes pulse { 50% { filter: brightness(0.78); } }
+
+.boxlabel { color: var(--muted); font-size: 0.8rem; }
+
+/* ------------------------------------------------------------------ read */
+
+.idle { color: var(--muted); font-size: 0.85rem; }
+.idle p { margin: 0 0 0.3rem; }
+.idle-sub { font-size: 0.78rem; opacity: 0.7; }
+
+/* Deliberately unlike the figures below it: a judgement, not a number. */
+.conf {
+  padding: 0.55rem 0.8rem; margin-bottom: 0.7rem;
+  border-left: 3px solid var(--muted);
+  font-size: 0.85rem; font-weight: 500;
+  animation: settle 260ms cubic-bezier(.2, .7, .3, 1);
+}
+.conf.high   { border-color: var(--high);   background: color-mix(in srgb, var(--high) 12%, var(--panel)); }
+.conf.medium { border-color: var(--medium); background: color-mix(in srgb, var(--medium) 12%, var(--panel)); }
+.conf.low    { border-color: var(--low);    background: color-mix(in srgb, var(--low) 14%, var(--panel)); }
+
+@keyframes settle {
+  from { opacity: 0; transform: translateY(-3px); }
+}
+
+.flags { list-style: none; margin: 0 0 1rem; padding: 0; }
+.flags li {
+  color: var(--muted); font-size: 0.78rem; line-height: 1.45;
+  padding-left: 0.8rem; position: relative;
+}
+.flags li::before {
+  content: ""; position: absolute; left: 0; top: 0.6em;
+  width: 4px; height: 1px; background: var(--muted);
+}
+
+.overlay { margin: 0 0 1.1rem; }
+.overlay img {
+  display: block; width: 100%; border-radius: var(--r); background: #000;
+}
+.overlay figcaption {
+  margin-top: 0.4rem; color: var(--muted); font-size: 0.72rem;
+}
+
+/* Similarity: one treatment for every figure, so they read as one set. */
+.figures { margin: 0; display: grid; gap: 0.9rem; }
+.figures div { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+.figures dt { color: var(--muted); font-size: 0.8rem; }
+.figures dd { margin: 0; font-weight: 500; }
+.figures dd.big { font-size: 1.55rem; font-weight: 600; letter-spacing: -0.015em; }
+.figures dd i { font-style: normal; color: var(--muted); font-size: 0.72rem; margin-left: 0.25rem; }
+
+.prov { margin: 1rem 0 0; color: var(--muted); font-size: 0.74rem; line-height: 1.5; }
+
+.raw { margin-top: 1rem; }
+.raw summary { color: var(--muted); font-size: 0.78rem; cursor: pointer; }
+.raw pre {
+  margin: 0.5rem 0 0; padding: 0.7rem; max-height: 16rem; overflow: auto;
+  background: var(--void); border-radius: var(--r);
+  font-size: 0.72rem; line-height: 1.5;
+}
+
+/* --------------------------------------------------------------- a11y/rwd */
+
+:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+
+@media (max-width: 960px) {
+  main { grid-template-columns: 1fr; }
+  .viewport { min-height: 16rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

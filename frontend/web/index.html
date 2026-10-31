@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nodule measurement</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="bar">
+  <h1>Nodule measurement</h1>
+  <div class="bar-state">
+    <span id="device" class="state">connecting…</span>
+    <span id="queue" class="state"></span>
+  </div>
+</header>
+
+<p class="disclaimer"><span>
+  Measurements only — not a diagnosis and not a clinical recommendation.
+  Interpretation stays with the radiologist. Research and education use, on
+  LIDC-IDRI data.
+</span></p>
+
+<div id="alerts"></div>
+
+<main>
+  <!-- CASES ------------------------------------------------------------- -->
+  <section class="panel rail" aria-labelledby="h-cases">
+    <h2 id="h-cases">Cases</h2>
+    <ul id="cases" class="cases"></ul>
+
+    <div class="add">
+      <h3>Add</h3>
+      <label class="drop" id="drop">
+        <input type="file" id="file" accept=".npz,.zip" hidden>
+        <span class="drop-main">Drop a file</span>
+        <span class="drop-sub">.npz region, or .zip of a DICOM series</span>
+      </label>
+      <button id="phantom" class="ghost">Create test phantom</button>
+    </div>
+  </section>
+
+  <!-- IMAGE -------------------------------------------------------------- -->
+  <section class="panel stage" aria-labelledby="h-image">
+    <h2 id="h-image" class="sr">Image</h2>
+
+    <div class="viewport" id="viewport">
+      <img id="slice" alt="CT slice" draggable="false">
+      <canvas id="draw"></canvas>
+      <p id="hint" class="hint">Drag across the nodule to measure it.</p>
+    </div>
+
+    <!-- Proximity: the scrubber belongs to the image, so it sits against it. -->
+    <div class="scrub">
+      <input type="range" id="z" min="0" max="0" value="0" aria-label="Slice">
+      <output id="zlabel" class="tabular">—</output>
+    </div>
+
+    <div class="act">
+      <button id="run" class="primary" disabled>Measure</button>
+      <span id="boxlabel" class="boxlabel tabular"></span>
+    </div>
+  </section>
+
+  <!-- MEASUREMENTS ------------------------------------------------------- -->
+  <section class="panel read" aria-labelledby="h-read">
+    <h2 id="h-read">Measurement</h2>
+
+    <div id="idle" class="idle">
+      <p>No measurement yet.</p>
+      <p class="idle-sub">Draw a box on the nodule, then choose Measure.</p>
+    </div>
+
+    <div id="result" hidden>
+      <div id="conf" class="conf"></div>
+      <ul id="flags" class="flags"></ul>
+
+      <figure class="overlay">
+        <img id="overlay" alt="Predicted outline on the prompted slice">
+        <figcaption>Red outline is the measurement. Yellow is your box.</figcaption>
+      </figure>
+
+      <dl class="figures">
+        <div><dt>Mean diameter</dt><dd class="big tabular"><span id="d-diam">—</span><i>mm</i></dd></div>
+        <div><dt>Volume</dt><dd class="big tabular"><span id="d-vol">—</span><i>mm³</i></dd></div>
+        <div><dt>Longest axis</dt><dd class="tabular"><span id="d-max">—</span><i>mm</i></dd></div>
+        <div><dt>Core attenuation</dt><dd class="tabular"><span id="d-hu">—</span><i>HU</i></dd></div>
+      </dl>
+
+      <p id="prov" class="prov"></p>
+
+      <details class="raw">
+        <summary>All measured values</summary>
+        <pre id="json" class="tabular"></pre>
+      </details>
+    </div>
+  </section>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>

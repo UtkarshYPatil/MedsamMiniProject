@@ -93,6 +93,23 @@ services:
     # Scale horizontally -- they share one queue and need no coordination:
     #   docker compose up --scale worker=4
 
+  # The web client. Static files on nginx: no Python, no model, no import
+  # from the backend. Runs alongside the Streamlit UI rather than replacing
+  # it, so a demo can fall back if anything here misbehaves.
+  web:
+    image: ${REGISTRY:-ghcr.io/utkarshypatil}/nodule-web:${TAG:-latest}
+    build:
+      context: .
+      dockerfile: docker/web.Dockerfile
+    environment:
+      # Reachable from the BROWSER, not from inside the Docker network.
+      API_BASE: ${API_BASE:-http://localhost:8000}
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
   ui:
     image: ${REGISTRY:-ghcr.io/utkarshypatil}/nodule-ui:${TAG:-latest}
     build:
