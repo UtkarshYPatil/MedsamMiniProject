@@ -95,7 +95,7 @@ def main():
                 "volume_ratio": (meas.get("volume_mm3", 0.0) / gt_vol) if gt_vol else np.nan,
                 "diameter_mean_mm": meas.get("diameter_mean_mm", 0.0),
                 "gt_diameter_mean_mm": as_dict(summarize(gt, vol_hu, spacing))["diameter_mean_mm"],
-                "empty": not m.any(),
+                "is_empty": not m.any(),
             })
 
     if not rows:
@@ -111,6 +111,9 @@ def main():
     print("=" * 76)
     print(f"  {'thresh':>7} {'dice':>7} {'d dice':>8} {'vol ratio':>10} "
           f"{'diam err':>9} {'helped':>7} {'harmed':>7} {'empty':>6}")
+    # NB: the column is is_empty, not empty -- DataFrame.empty is a property
+    # that returns a bool, so g.empty silently gives the frame's emptiness
+    # instead of the column and fails with 'bool has no attribute sum'.
     print("  " + "-" * 68)
     best = None
     for t in ths:
@@ -121,7 +124,7 @@ def main():
         print(f"  {t:>7.2f} {dice:>7.3f} {dice - base.dice.mean():>+8.3f} "
               f"{g.volume_ratio.replace([np.inf,-np.inf],np.nan).median():>10.2f} "
               f"{derr:>+9.2f} {int((diff > 1e-9).sum()):>7} "
-              f"{int((diff < -1e-9).sum()):>7} {int(g.empty.sum()):>6}")
+              f"{int((diff < -1e-9).sum()):>7} {int(g["is_empty"].sum()):>6}")
         if best is None or dice > best[1]:
             best = (t, dice)
     print("=" * 76)
