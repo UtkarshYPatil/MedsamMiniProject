@@ -45,13 +45,40 @@ async function api(path, opts = {}) {
   return r.headers.get("content-type")?.includes("json") ? r.json() : r;
 }
 
-function alert_(message, kind = "error") {
-  const node = document.createElement("div");
-  node.className = kind === "warn" ? "alert warn" : "alert";
-  node.textContent = message;
-  el.alerts.replaceChildren(node);
+/* Two kinds of message share this strip, and they used to fight over one
+   slot: a STATUS (the stack is broken, true until it isn't) and a NOTICE
+   (about this case or this action). alert_ replaced the whole strip, so
+   opening a case wiped "no worker connected" and the reader was left with
+   a red word in the corner and no explanation of it. They are kept apart
+   now: status survives case changes, notice does not, and neither can
+   silently delete the other. */
+let _status = null;              // {message, kind} or null
+let _notice = null;
+
+function renderAlerts() {
+  const make = (a) => {
+    const node = document.createElement("div");
+    node.className = a.kind === "warn" ? "alert warn" : "alert";
+    node.textContent = a.message;
+    return node;
+  };
+  el.alerts.replaceChildren(...[_status, _notice].filter(Boolean).map(make));
 }
-const clearAlerts = () => el.alerts.replaceChildren();
+
+function setStatus(message, kind = "error") {
+  const next = message ? { message, kind } : null;
+  // Idempotent: health() runs every 15s and must not restack or re-animate
+  // a banner that has not changed.
+  if (JSON.stringify(next) === JSON.stringify(_status)) return;
+  _status = next;
+  renderAlerts();
+}
+
+function alert_(message, kind = "error") {
+  _notice = { message, kind };
+  renderAlerts();
+}
+const clearAlerts = () => { _notice = null; renderAlerts(); };
 
 /* ---------------------------------------------------------------- health */
 
@@ -66,17 +93,23 @@ async function health() {
     if (h.workers_alive === 0) {
       el.device.textContent = "no worker connected";
       el.device.className = "state down";
-      alert_("No worker is connected, so measurements will queue and never " +
-             "run. Check the worker container.");
+      setStatus("No worker is connected, so a measurement would queue and " +
+                "never run. Start it with:  docker compose up -d worker  " +
+                "(add -f docker-compose.gpu.yml for CUDA), then check " +
+                "docker compose logs worker.");
     } else if (w.checkpoint_present === false && !w.dry_run) {
-      alert_("The worker has no model checkpoint, so measuring will fail.");
+      setStatus("The worker has no model checkpoint, so measuring will fail. " +
+                "Put MedSAM2_CTLesion.pt in ./checkpoints and restart it.");
     } else if (w.dry_run) {
-      alert_("Dry run: a stand-in segmenter is active and every number below " +
-             "is invented.", "warn");
+      setStatus("Dry run: a stand-in segmenter is active and every number " +
+                "below is invented.", "warn");
+    } else {
+      setStatus(null);
     }
   } catch {
     el.device.textContent = `cannot reach ${API}`;
     el.device.className = "state down";
+    setStatus(`Cannot reach the API at ${API}. Is the api container up?`);
   }
 }
 
