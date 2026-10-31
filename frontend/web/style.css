@@ -1,21 +1,32 @@
 /*
-  Nodule measurement — a reading-room instrument, not a dashboard.
+  Nodule measurement -- a reading-room instrument rendered in glass.
 
   WHY IT LOOKS LIKE THIS
   Radiologists read in dim rooms on calibrated greyscale displays, because
   low-contrast detail in lung parenchyma is invisible against a bright
   surround. So the dark surface is the working environment, not a style, and
   it sets the one rule everything else follows: THE IMAGE IS THE BRIGHTEST
-  THING ON SCREEN. Panels sit below it, chrome below that.
+  THING ON SCREEN, and the one surface that is never translucent.
 
-  The accent is cool teal on purpose. The API renders its overlay in red (the
-  measurement) and yellow (your box). If the interface also used a warm
-  accent they would compete, and the two colours that carry clinical meaning
-  would stop being the only warm marks in view.
+  MATERIALS
+  Panels are a frosted layer: blur, a dark tint, a hairline edge, a specular
+  top. Weight encodes hierarchy -- the structural panels are the heavy, dark
+  material; only the primary action gets the light material that catches the
+  light. A light translucent surface is never stacked on another, because
+  legibility collapses when it is.
+
+  Translucency eats contrast, so type over it is pushed back up: brighter,
+  half a weight heavier, and with a little more tracking at small sizes.
+  Flat grey dissolves on glass.
+
+  The accent is ice blue. The API renders its overlay in red (the
+  measurement) and yellow (your box). A cool accent cannot be mistaken for
+  either, so the two colours that carry clinical meaning stay the only warm
+  marks in view.
 
   GESTALT, where each is doing a job rather than being named:
-    figure/ground  image brightest, panels darker, chrome darkest
-    common region  each panel is a bounded surface, not a floating card
+    figure/ground  image opaque and brightest, panels frosted, chrome behind
+    common region  each panel is a bounded material, not a floating card
     proximity      the scrubber touches the image it drives; Measure sits
                    under the box readout it acts on
     similarity     every measurement shares one treatment, so they read as a
@@ -24,24 +35,39 @@
     continuity     left to right is the task order: pick, place, read
     closure        the box is drawn as four corner marks. The eye closes the
                    rectangle, and what you see is a reticle rather than a
-                   border — which is what placing a measurement feels like.
+                   border -- which is what placing a measurement feels like.
 */
 
 :root {
-  --void:   #0a0d10;
-  --panel:  #141a1f;
-  --raise:  #1b232a;
-  --line:   #263038;
-  --text:   #dde5ea;
-  --muted:  #7b8a95;
-  --signal: #35d0c0;
+  --void:   #060a0f;
+  --ambient-a: #0d1a26;
+  --ambient-b: #060a0f;
 
-  --high:   #3fb27f;
-  --medium: #d9a441;
-  --low:    #e0614e;
+  /* the frosted material */
+  --glass-a: rgba(22, 34, 46, 0.78);
+  --glass-b: rgba(9, 16, 24, 0.86);
+  --edge:    rgba(165, 210, 245, 0.20);
+  --spec:    rgba(190, 225, 255, 0.26);
+  --raise:   rgba(255, 255, 255, 0.10);
 
-  --pad: 1.25rem;
-  --r: 3px;                 /* instruments have small radii, not pills */
+  --text:   #eef6fc;
+  --muted:  #b9cddd;
+
+  --signal:   #5ab9ff;          /* app.js reads this for the box reticle */
+  --signal-b: #9ad6ff;
+  --signal-c: #2f86c9;
+  --ink:      #04202f;          /* type on the light material */
+
+  --high:   #49c88e;
+  --medium: #e0a94a;
+  --low:    #e8705c;
+
+  --pad: 1.35rem;
+  --r: 18px;                    /* the material is moulded, not cut */
+  --r-sm: 12px;
+
+  /* the built-in easings are too weak to read as intentional */
+  --ease-out: cubic-bezier(.23, 1, .32, 1);
 }
 
 * { box-sizing: border-box; }
@@ -50,7 +76,17 @@ html { color-scheme: dark; }
 
 body {
   margin: 0;
+  height: 100vh;
+  overflow: hidden;             /* a reading instrument fills the screen */
+  display: flex;
+  flex-direction: column;       /* replaces a brittle calc(100vh - 7.6rem) */
   background: var(--void);
+  /* frosted glass over a flat colour is just a tinted box. This gives the
+     blur something to pick up, at a contrast low enough to ignore. */
+  background-image:
+    radial-gradient(1100px 620px at 18% -8%, var(--ambient-a), transparent 70%),
+    radial-gradient(900px 560px at 92% 108%, #0b1420, transparent 72%);
+  background-attachment: fixed;
   color: var(--text);
   font: 400 15px/1.5 "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -65,128 +101,185 @@ body {
 
 /* ---------------------------------------------------------------- header */
 
+/* Scroll edge effect rather than a 1px rule: a fade where floating chrome
+   meets content, which is what a material boundary actually looks like. */
+.bar, .disclaimer { position: relative; flex: none; }
+.bar::after, .disclaimer::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 14px;
+  background: linear-gradient(to bottom, rgba(0,0,0,0), rgba(0,0,0,0.26));
+  pointer-events: none;
+}
+
 .bar {
   display: flex; align-items: baseline; gap: 1rem;
-  padding: 0.85rem var(--pad);
-  border-bottom: 1px solid var(--line);
+  padding: 0.9rem var(--pad);
 }
 .bar h1 {
-  margin: 0; font-size: 0.95rem; font-weight: 600; letter-spacing: 0.01em;
+  margin: 0; font-size: 0.95rem; font-weight: 600; letter-spacing: -0.005em;
 }
 .bar-state { margin-left: auto; display: flex; gap: 1rem; }
 
-.state { color: var(--muted); font-size: 0.8rem; }
+.state { color: var(--muted); font-size: 0.8rem; font-weight: 500; letter-spacing: 0.01em; }
 .state.live::before {
   content: ""; display: inline-block;
   width: 6px; height: 6px; margin-right: 0.45rem;
   border-radius: 50%; background: var(--signal);
+  box-shadow: 0 0 10px var(--signal);
   vertical-align: 0.1em;
 }
 .state.down { color: var(--low); }
-.state.down::before { background: var(--low); }
+.state.down::before { background: var(--low); box-shadow: 0 0 10px var(--low); }
 
 .disclaimer {
-  margin: 0; padding: 0.6rem var(--pad);
-  border-bottom: 1px solid var(--line);
-  color: var(--muted); font-size: 0.78rem;
+  margin: 0; padding: 0.65rem var(--pad);
+  color: var(--muted); font-size: 0.78rem; letter-spacing: 0.008em;
 }
 .disclaimer span { display: block; max-width: 92ch; }
 
 /* ---------------------------------------------------------------- alerts */
 
+#alerts { flex: none; }
 #alerts:not(:empty) { padding: var(--pad) var(--pad) 0; }
 .alert {
-  padding: 0.7rem 0.9rem; margin-bottom: 0.6rem;
-  border-left: 2px solid var(--low);
-  background: color-mix(in srgb, var(--low) 12%, var(--panel));
+  padding: 0.75rem 0.95rem; margin-bottom: 0.6rem;
+  border-radius: var(--r-sm);
+  border: 1px solid color-mix(in srgb, var(--low) 42%, transparent);
+  background: color-mix(in srgb, var(--low) 16%, var(--glass-b));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.12);
   font-size: 0.85rem;
 }
 .alert.warn {
-  border-color: var(--medium);
-  background: color-mix(in srgb, var(--medium) 12%, var(--panel));
+  border-color: color-mix(in srgb, var(--medium) 42%, transparent);
+  background: color-mix(in srgb, var(--medium) 16%, var(--glass-b));
 }
 
 /* ----------------------------------------------------------------- shell */
 
 main {
+  flex: 1; min-height: 0;
   display: grid;
-  grid-template-columns: 15rem minmax(0, 1fr) 21rem;
-  gap: 1px;
-  background: var(--line);          /* the gap IS the hairline between panels */
-  height: calc(100vh - 7.6rem);
+  /* minmax(0,1fr), not the implicit auto row: an auto row sizes to the
+     TALLEST panel's content and silently pushes Measure below the fold. */
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: 16rem minmax(0, 1fr) 22rem;
+  gap: 1.1rem;
+  padding: 0 var(--pad) var(--pad);
 }
 
-.read { overflow-y: auto; }
-.panel { background: var(--panel); padding: var(--pad); min-width: 0; }
+.rail, .read { overflow-y: auto; }
+
+/* The structural material: heavy, dark, frosted. */
+.panel {
+  padding: var(--pad);
+  min-width: 0; min-height: 0;
+  border-radius: var(--r);
+  border: 1px solid var(--edge);
+  background: linear-gradient(170deg, var(--glass-a), var(--glass-b) 46%, var(--glass-a));
+  backdrop-filter: blur(26px) saturate(1.5);
+  -webkit-backdrop-filter: blur(26px) saturate(1.5);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55), inset 0 1px 0 var(--spec);
+
+  /* Materialise: blur and scale together, so the surface reads as arriving
+     rather than as paint fading up. One orchestrated page-load sequence. */
+  opacity: 0;
+  transform: scale(0.99) translateY(5px);
+  filter: blur(5px);
+  animation: materialize 520ms var(--ease-out) forwards;
+}
+.panel:nth-of-type(1) { animation-delay: 0ms; }
+.panel:nth-of-type(2) { animation-delay: 55ms; }
+.panel:nth-of-type(3) { animation-delay: 110ms; }
+
+@keyframes materialize {
+  to { opacity: 1; transform: scale(1) translateY(0); filter: blur(0); }
+}
 
 .panel h2 {
-  margin: 0 0 0.9rem; font-size: 0.78rem; font-weight: 600;
-  color: var(--muted); letter-spacing: 0.02em;
+  margin: 0 0 1rem; font-size: 0.75rem; font-weight: 600;
+  color: var(--muted); letter-spacing: 0.05em; text-transform: uppercase;
 }
 .panel h3 {
-  margin: 0 0 0.5rem; font-size: 0.78rem; font-weight: 500; color: var(--muted);
+  margin: 0 0 0.55rem; font-size: 0.78rem; font-weight: 500; color: var(--muted);
 }
 
 /* ------------------------------------------------------------------ rail */
 
 .cases { list-style: none; margin: 0 0 1.5rem; padding: 0; }
-.cases li { margin-bottom: 1px; }
+.cases li { margin-bottom: 2px; }
 
 .case {
   display: block; width: 100%; text-align: left;
-  padding: 0.55rem 0.65rem;
-  background: none; border: 0; border-left: 2px solid transparent;
-  color: var(--text); font: inherit; font-size: 0.85rem;
+  padding: 0.6rem 0.75rem;
+  background: none; border: 0; border-radius: var(--r-sm);
+  color: var(--text); font: inherit; font-size: 0.85rem; font-weight: 500;
   cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease;
+  transition: background 180ms var(--ease-out);
 }
-.case:hover { background: var(--raise); }
+.case:hover { background: rgba(255, 255, 255, 0.06); }
 .case[aria-current="true"] {
-  background: var(--raise); border-left-color: var(--signal);
+  background: var(--raise);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
 }
-.case small { display: block; color: var(--muted); font-size: 0.72rem; }
+.case small {
+  display: block; margin-top: 0.18rem;
+  color: var(--muted); font-size: 0.72rem; font-weight: 400; letter-spacing: 0.018em;
+}
 
 .drop {
-  display: block; padding: 1.1rem 0.8rem; margin-bottom: 0.6rem;
-  border: 1px dashed var(--line); border-radius: var(--r);
+  display: block; padding: 1.2rem 0.85rem; margin-bottom: 0.65rem;
+  border: 1px dashed var(--edge); border-radius: var(--r-sm);
   text-align: center; cursor: pointer;
-  transition: border-color 140ms ease, background 140ms ease;
+  transition: border-color 180ms var(--ease-out), background 180ms var(--ease-out);
 }
-.drop:hover, .drop.over { border-color: var(--signal); background: var(--raise); }
-.drop-main { display: block; font-size: 0.85rem; }
-.drop-sub  { display: block; margin-top: 0.2rem; color: var(--muted); font-size: 0.72rem; }
+.drop:hover, .drop.over {
+  border-color: var(--signal);
+  background: color-mix(in srgb, var(--signal) 10%, transparent);
+}
+.drop-main { display: block; font-size: 0.85rem; font-weight: 500; }
+.drop-sub  { display: block; margin-top: 0.25rem; color: var(--muted); font-size: 0.72rem; letter-spacing: 0.018em; }
 
-button { font: inherit; cursor: pointer; border-radius: var(--r); }
+button { font: inherit; cursor: pointer; border-radius: 999px; }
 
 .ghost {
-  width: 100%; padding: 0.5rem;
-  background: none; border: 1px solid var(--line); color: var(--muted);
-  font-size: 0.82rem;
-  transition: border-color 140ms ease, color 140ms ease;
+  width: 100%; padding: 0.6rem;
+  background: none; border: 1px solid var(--edge); color: var(--muted);
+  font-size: 0.82rem; font-weight: 500;
+  transition: border-color 180ms var(--ease-out), color 180ms var(--ease-out),
+              transform 160ms var(--ease-out);
 }
-.ghost:hover { border-color: var(--muted); color: var(--text); }
+.ghost:hover { border-color: var(--signal-b); color: var(--text); }
+.ghost:active { transform: scale(0.98); }
 
 /* ----------------------------------------------------------------- stage */
 
 .stage { display: flex; flex-direction: column; min-height: 0; }
 
 .viewport {
-  position: relative; flex: 1;
-  display: grid; place-items: center;
-  min-height: 20rem; padding: 0.75rem;
+  position: relative;
+  /* An explicit minmax(0,1fr) track, not place-items:center: a content-sized
+     grid row lets the image define its own height and spill past the panel,
+     which object-fit cannot rescue because the ELEMENT is already too tall. */
+  display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr);
   /* min-height:0 lets this flex child shrink, so the scrubber and Measure
      stay on screen instead of being pushed below the fold. */
   flex: 1; min-height: 0;
-  background: #000;                 /* the image's own ground */
-  border-radius: var(--r);
+  padding: 0;
+  background: #000;                 /* never translucent: this is the read */
+  border-radius: var(--r-sm);
   overflow: hidden;
 }
 .viewport img {
-  /* width:100% makes a 320px or 512px slice scale UP to fill the panel --
-     max-width alone never upscales. No object-fit: that would keep the
-     element box full-size while letterboxing the pixels inside it, and the
-     canvas maps pointer coordinates through this element's rect. */
-  display: block; width: 100%; height: auto; max-height: 100%;
+  /* object-fit:contain scales a 128px or 512px slice UP to fill the panel
+     and never distorts it -- max-width alone will not upscale, and
+     width:100% + max-height stretches a square slice into a rectangle,
+     which a measurement tool must never do.
+
+     The cost is that the ELEMENT box stays panel-sized while the picture is
+     letterboxed inside it, so app.js must not map pointer coordinates
+     through getBoundingClientRect(). It uses pictureRect() instead, which
+     recomputes the fitted rect from naturalWidth/naturalHeight. Those two
+     have to stay in step: change the fit here and you change it there. */
+  display: block; width: 100%; height: 100%; object-fit: contain;
   image-rendering: auto; user-select: none;
 }
 .viewport canvas {
@@ -195,102 +288,143 @@ button { font: inherit; cursor: pointer; border-radius: var(--r); }
 }
 
 .hint {
-  position: absolute; bottom: 0.7rem; left: 50%; translate: -50% 0;
-  margin: 0; padding: 0.3rem 0.7rem;
-  background: rgba(10, 13, 16, 0.82); border-radius: var(--r);
-  color: var(--muted); font-size: 0.78rem;
-  transition: opacity 200ms ease;
+  position: absolute; bottom: 0.8rem; left: 50%; translate: -50% 0;
+  margin: 0; padding: 0.35rem 0.8rem;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text); font-size: 0.78rem;
+  transition: opacity 200ms var(--ease-out);
 }
 .hint[hidden] { display: block; opacity: 0; pointer-events: none; }
 
 /* Proximity: pinned to the image, not floated into a control column. */
-.scrub { display: flex; align-items: center; gap: 0.8rem; margin-top: 0.7rem; }
+.scrub { display: flex; align-items: center; gap: 0.9rem; margin-top: 0.85rem; }
 .scrub input { flex: 1; accent-color: var(--signal); }
-.scrub output { color: var(--muted); font-size: 0.8rem; min-width: 7ch; text-align: right; }
-
-.act { display: flex; align-items: center; gap: 0.9rem; margin-top: 0.9rem; }
-
-.primary {
-  padding: 0.6rem 1.4rem;
-  background: var(--signal); border: 0; color: #06211e;
-  font-weight: 600; font-size: 0.88rem;
-  transition: filter 140ms ease, opacity 140ms ease;
+.scrub output {
+  color: var(--muted); font-size: 0.8rem; font-weight: 500;
+  min-width: 7ch; text-align: right; letter-spacing: 0.018em;
 }
-.primary:hover:not(:disabled) { filter: brightness(1.08); }
-.primary:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.act { display: flex; align-items: center; gap: 0.95rem; margin-top: 1rem; }
+
+/* The light material: the one surface that catches the light. */
+.primary {
+  padding: 0.65rem 1.6rem;
+  border: 0; color: var(--ink);
+  font-weight: 600; font-size: 0.88rem;
+  background: linear-gradient(170deg, var(--signal-b), var(--signal) 58%, var(--signal-c));
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  transition: transform 160ms var(--ease-out), filter 160ms var(--ease-out),
+              opacity 160ms var(--ease-out);
+}
+.primary:hover:not(:disabled) { filter: brightness(1.06); }
+.primary:active:not(:disabled) { transform: scale(0.97); }  /* feedback on press */
+.primary:disabled { opacity: 0.3; cursor: not-allowed; box-shadow: none; }
 .primary.busy { animation: pulse 1.4s ease-in-out infinite; }
 
-@keyframes pulse { 50% { filter: brightness(0.78); } }
+@keyframes pulse { 50% { filter: brightness(0.74); } }
 
-.boxlabel { color: var(--muted); font-size: 0.8rem; }
+.boxlabel { color: var(--muted); font-size: 0.8rem; font-weight: 500; letter-spacing: 0.018em; }
 
 /* ------------------------------------------------------------------ read */
 
 .idle { color: var(--muted); font-size: 0.85rem; }
 .idle p { margin: 0 0 0.3rem; }
-.idle-sub { font-size: 0.78rem; opacity: 0.7; }
+.idle-sub { font-size: 0.78rem; opacity: 0.75; }
 
 /* Deliberately unlike the figures below it: a judgement, not a number. */
 .conf {
-  padding: 0.55rem 0.8rem; margin-bottom: 0.7rem;
-  border-left: 3px solid var(--muted);
-  font-size: 0.85rem; font-weight: 500;
-  animation: settle 260ms cubic-bezier(.2, .7, .3, 1);
+  display: flex; align-items: center; gap: 0.55rem;
+  padding: 0.65rem 0.9rem; margin-bottom: 0.8rem;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--edge);
+  background: linear-gradient(170deg, rgba(255,255,255,0.13), rgba(255,255,255,0.05));
+  box-shadow: inset 0 1px 0 var(--spec);
+  font-size: 0.85rem; font-weight: 600; letter-spacing: 0.01em;
+  animation: settle 260ms var(--ease-out);
 }
-.conf.high   { border-color: var(--high);   background: color-mix(in srgb, var(--high) 12%, var(--panel)); }
-.conf.medium { border-color: var(--medium); background: color-mix(in srgb, var(--medium) 12%, var(--panel)); }
-.conf.low    { border-color: var(--low);    background: color-mix(in srgb, var(--low) 14%, var(--panel)); }
+.conf::before {
+  content: ""; flex: none;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--muted);
+}
+.conf.high::before   { background: var(--high);   box-shadow: 0 0 9px var(--high); }
+.conf.medium::before { background: var(--medium); box-shadow: 0 0 9px var(--medium); }
+.conf.low::before    { background: var(--low);    box-shadow: 0 0 9px var(--low); }
 
 @keyframes settle {
   from { opacity: 0; transform: translateY(-3px); }
 }
 
-.flags { list-style: none; margin: 0 0 1rem; padding: 0; }
+.flags { list-style: none; margin: 0 0 1.1rem; padding: 0; }
 .flags li {
-  color: var(--muted); font-size: 0.78rem; line-height: 1.45;
-  padding-left: 0.8rem; position: relative;
+  color: var(--muted); font-size: 0.78rem; line-height: 1.5;
+  padding-left: 0.85rem; position: relative; letter-spacing: 0.012em;
 }
 .flags li::before {
-  content: ""; position: absolute; left: 0; top: 0.6em;
-  width: 4px; height: 1px; background: var(--muted);
+  content: ""; position: absolute; left: 0; top: 0.62em;
+  width: 5px; height: 1px; background: var(--muted); opacity: 0.75;
 }
 
-.overlay { margin: 0 0 1.1rem; }
+.overlay { margin: 0 0 1.15rem; }
 .overlay img {
-  display: block; width: 100%; border-radius: var(--r); background: #000;
+  display: block; width: 100%; border-radius: var(--r-sm); background: #000;
 }
 .overlay figcaption {
-  margin-top: 0.4rem; color: var(--muted); font-size: 0.72rem;
+  margin-top: 0.45rem; color: var(--muted); font-size: 0.72rem; letter-spacing: 0.018em;
 }
 
 /* Similarity: one treatment for every figure, so they read as one set. */
-.figures { margin: 0; display: grid; gap: 0.9rem; }
+.figures { margin: 0; display: grid; gap: 0.95rem; }
 .figures div { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
-.figures dt { color: var(--muted); font-size: 0.8rem; }
+.figures dt { color: var(--muted); font-size: 0.8rem; letter-spacing: 0.015em; }
 .figures dd { margin: 0; font-weight: 500; }
-.figures dd.big { font-size: 1.55rem; font-weight: 600; letter-spacing: -0.015em; }
-.figures dd i { font-style: normal; color: var(--muted); font-size: 0.72rem; margin-left: 0.25rem; }
+.figures dd.big { font-size: 1.6rem; font-weight: 600; letter-spacing: -0.022em; }
+.figures dd i { font-style: normal; color: var(--muted); font-size: 0.72rem; margin-left: 0.25rem; font-weight: 400; }
 
-.prov { margin: 1rem 0 0; color: var(--muted); font-size: 0.74rem; line-height: 1.5; }
+.prov { margin: 1.1rem 0 0; color: var(--muted); font-size: 0.74rem; line-height: 1.6; opacity: 0.85; }
 
 .raw { margin-top: 1rem; }
 .raw summary { color: var(--muted); font-size: 0.78rem; cursor: pointer; }
 .raw pre {
-  margin: 0.5rem 0 0; padding: 0.7rem; max-height: 16rem; overflow: auto;
-  background: var(--void); border-radius: var(--r);
-  font-size: 0.72rem; line-height: 1.5;
+  margin: 0.5rem 0 0; padding: 0.75rem; max-height: 16rem; overflow: auto;
+  background: rgba(0, 0, 0, 0.4); border-radius: var(--r-sm);
+  border: 1px solid var(--edge);
+  font-size: 0.72rem; line-height: 1.55;
 }
 
 /* --------------------------------------------------------------- a11y/rwd */
 
-:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+:focus-visible { outline: 2px solid var(--signal-b); outline-offset: 2px; }
 
 @media (max-width: 960px) {
-  main { grid-template-columns: 1fr; }
+  body { height: auto; min-height: 100vh; overflow: visible; }
+  main { grid-template-columns: 1fr; grid-template-rows: none; }
+  .rail, .read { overflow-y: visible; }
   .viewport { min-height: 16rem; }
 }
 
+/* Reduced transparency is not cosmetic here: a reader who has asked for it
+   gets a solid panel and no ambient wash behind the glass. */
+@media (prefers-reduced-transparency: reduce) {
+  body { background-image: none; }
+  .panel, .hint {
+    backdrop-filter: none; -webkit-backdrop-filter: none;
+    background: #0d141c;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .panel { background: #0c1218; border-color: rgba(255, 255, 255, 0.42); }
+  .figures dt, .flags li, .prov, .state, .boxlabel,
+  .disclaimer, .overlay figcaption { color: #e8f2f9; }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .panel { animation: none; opacity: 1; transform: none; filter: none; }
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;

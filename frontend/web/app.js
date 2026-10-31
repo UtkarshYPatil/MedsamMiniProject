@@ -135,10 +135,30 @@ function setSlice(z) {
 
 /* ------------------------------------------------------- drawing the box */
 
-function canvasToImage(ev) {
-  // The <img> is letterboxed inside the viewport, so map through its real
-  // rendered rectangle rather than the canvas, or the box lands off-target.
+/* The <img> is object-fit:contain, so its element box is the whole viewport
+   while the picture is letterboxed inside it. Every pointer/overlay
+   coordinate must go through the PICTURE rect, not the element rect. */
+function pictureRect() {
   const r = el.slice.getBoundingClientRect();
+  const nw = el.slice.naturalWidth, nh = el.slice.naturalHeight;
+  if (!nw || !nh) return r;
+  const s = Math.min(r.width / nw, r.height / nh);
+  const w = nw * s, h = nh * s;
+  return { left: r.left + (r.width - w) / 2, top: r.top + (r.height - h) / 2,
+           width: w, height: h };
+}
+
+let _accent = "";
+function accent() {
+  if (!_accent) {
+    _accent = getComputedStyle(document.documentElement)
+      .getPropertyValue("--signal").trim() || "#5ab9ff";
+  }
+  return _accent;
+}
+
+function canvasToImage(ev) {
+  const r = pictureRect();
   const [, H, W] = state.shape;
   return {
     x: Math.max(0, Math.min(W - 1, ((ev.clientX - r.left) / r.width) * W)),
@@ -157,7 +177,7 @@ function paint() {
   g.clearRect(0, 0, r.width, r.height);
   if (!state.box || !state.shape) return;
 
-  const ir = el.slice.getBoundingClientRect();
+  const ir = pictureRect();
   const [, H, W] = state.shape;
   const sx = ir.width / W, sy = ir.height / H;
   const ox = ir.left - r.left, oy = ir.top - r.top;
@@ -169,7 +189,9 @@ function paint() {
   // and what is left on screen reads as a reticle rather than a border -- so
   // the lesion is framed instead of covered.
   const arm = Math.max(7, Math.min(18, (R - L) * 0.28));
-  g.strokeStyle = "#35d0c0";
+  // One source of truth for the accent: the reticle cannot drift away
+  // from the palette, because it reads the same token the CSS does.
+  g.strokeStyle = accent();
   g.lineWidth = 1.5;
   g.lineCap = "round";
   g.beginPath();
