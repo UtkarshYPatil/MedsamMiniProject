@@ -106,8 +106,16 @@ async function loadCases(select) {
 async function openCase(id) {
   state.caseId = id;
   state.box = null;
+  state.boxSource = null;
   state.jobId = null;
   clearAlerts();
+  // Only on a CASE change -- never on scrubbing, which happens constantly
+  // and must stay a 1:1 response to the slider.
+  if (!reduceMotion) {
+    el.slice.classList.remove("swap");
+    void el.slice.offsetWidth;
+    el.slice.classList.add("swap");
+  }
 
   const c = await api(`/api/cases/${id}`);
   state.shape = c.shape;
@@ -125,6 +133,7 @@ async function openCase(id) {
   el.boxlabel.textContent = "";
   paint();
   loadCases();                       // refresh the current-case marker
+  proposeBox(id);                    // offered, not awaited: the viewer is usable now
 }
 
 function setSlice(z) {
@@ -138,6 +147,60 @@ function setSlice(z) {
 /* The <img> is object-fit:contain, so its element box is the whole viewport
    while the picture is letterboxed inside it. Every pointer/overlay
    coordinate must go through the PICTURE rect, not the element rect. */
+/* A proposed box fades up rather than blinking into existence -- it is a
+   state change the reader did not cause, so it has to announce itself. */
+let suggestFade = 1;
+function fadeInProposal() {
+  if (reduceMotion) { suggestFade = 1; paint(); return; }
+  const t0 = performance.now(), ms = 260;
+  const step = (t) => {
+    suggestFade = Math.min(1, (t - t0) / ms);
+    paint();
+    if (suggestFade < 1) requestAnimationFrame(step);
+  };
+  suggestFade = 0;
+  requestAnimationFrame(step);
+}
+
+/* Ask the API where it thinks the nodule is. This is a PROPOSAL, and a
+   weak one: on 100 validation ROIs the auto-prompt missed the nodule
+   entirely about 7 times in 10. It is offered to save a drag on the easy
+   cases, never as a finding, which is why it arrives dashed and with the
+   miss rate stated rather than silently filled in. */
+async function proposeBox(id) {
+  let sg;
+  try {
+    sg = await api(`/api/cases/${id}/suggest`);
+  } catch {
+    return;                       // a missing proposal is not an error
+  }
+  if (state.caseId !== id) return;        // the reader moved on while we asked
+
+  if (!sg || sg.box === null) {
+    const detail = sg && sg.info && sg.info.detail;
+    if (detail) alert_(detail, "warn");
+    return;
+  }
+
+  const z = Number.isFinite(sg.slice) ? sg.slice : state.z;
+  el.z.value = String(z);
+  setSlice(z);
+  state.box = sg.box.map(Number);
+  state.boxSource = sg.source || "auto";
+  el.run.disabled = false;
+  el.hint.hidden = true;
+  boxLabel();
+  fadeInProposal();
+
+  alert_(sg.source === "centred_fallback"
+    ? "No candidate stood out, so this is simply a box in the middle of the " +
+      "crop. Treat it as a starting point and move it onto the nodule."
+    : "Starting box placed automatically. It assumes the nodule sits near " +
+      "the centre of the crop; on the validation set that assumption missed " +
+      "the nodule in roughly 7 of 10 cases. Check it before measuring.",
+    "warn");
+}
+
 function pictureRect() {
   const r = el.slice.getBoundingClientRect();
   const nw = el.slice.naturalWidth, nh = el.slice.naturalHeight;
@@ -149,6 +212,15 @@ function pictureRect() {
 }
 
 let _accent = "";
+function accentFill(a) {
+  const c = accent();
+  if (/^#[0-9a-f]{6}$/i.test(c)) {
+    const n = parseInt(c.slice(1), 16);
+    return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+  }
+  return `rgba(90, 185, 255, ${a})`;
+}
+
 function accent() {
   if (!_accent) {
     _accent = getComputedStyle(document.documentElement)
@@ -189,10 +261,20 @@ function paint() {
   // and what is left on screen reads as a reticle rather than a border -- so
   // the lesion is framed instead of covered.
   const arm = Math.max(7, Math.min(18, (R - L) * 0.28));
+
+  // A box the TOOL proposed must not look like a box the READER placed.
+  // Dashed and dimmer, until the reader takes hold of it -- at which point
+  // pointerdown clears boxSource and it becomes solid.
+  const proposed = !!state.boxSource;
+  g.save();
+  if (proposed) {
+    g.globalAlpha = suggestFade;
+    g.setLineDash([5, 4]);
+  }
   // One source of truth for the accent: the reticle cannot drift away
   // from the palette, because it reads the same token the CSS does.
   g.strokeStyle = accent();
-  g.lineWidth = 1.5;
+  g.lineWidth = proposed ? 1.2 : 1.5;
   g.lineCap = "round";
   g.beginPath();
   for (const [cx, cy, dx, dy] of [
@@ -202,8 +284,9 @@ function paint() {
   }
   g.stroke();
 
-  g.fillStyle = "rgba(53, 208, 192, 0.07)";
+  g.fillStyle = accentFill(proposed ? 0.04 : 0.07);
   g.fillRect(L, T, R - L, B - T);
+  g.restore();
 }
 
 function boxLabel() {
@@ -217,6 +300,8 @@ function boxLabel() {
 el.draw.addEventListener("pointerdown", (ev) => {
   if (!state.shape) return;
   el.draw.setPointerCapture(ev.pointerId);
+  state.boxSource = null;            // from here it is the reader's box
+  suggestFade = 1;
   state.drag = canvasToImage(ev);
   el.hint.hidden = true;
 });
@@ -329,6 +414,11 @@ function show(res, jobId) {
   }
   el.idle.hidden = true;
   el.result.hidden = false;
+  // Re-trigger the reveal: a measurement is occasional, so it can afford
+  // to arrive rather than appear.
+  el.result.classList.remove("reveal");
+  void el.result.offsetWidth;
+  el.result.classList.add("reveal");
 
   const level = res.confidence || "unknown";
   el.conf.className = `conf ${level}`;

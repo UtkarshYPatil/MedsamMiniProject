@@ -142,6 +142,7 @@ body {
 #alerts:not(:empty) { padding: var(--pad) var(--pad) 0; }
 .alert {
   padding: 0.75rem 0.95rem; margin-bottom: 0.6rem;
+  animation: drop 240ms var(--ease-out);
   border-radius: var(--r-sm);
   border: 1px solid color-mix(in srgb, var(--low) 42%, transparent);
   background: color-mix(in srgb, var(--low) 16%, var(--glass-b));
@@ -151,6 +152,12 @@ body {
 .alert.warn {
   border-color: color-mix(in srgb, var(--medium) 42%, transparent);
   background: color-mix(in srgb, var(--medium) 16%, var(--glass-b));
+}
+
+/* An alert is something the reader did not ask for, so it arrives from
+   above rather than appearing already in place. */
+@keyframes drop {
+  from { opacity: 0; transform: translateY(-6px); }
 }
 
 /* ----------------------------------------------------------------- shell */
@@ -282,6 +289,12 @@ button { font: inherit; cursor: pointer; border-radius: 999px; }
   display: block; width: 100%; height: 100%; object-fit: contain;
   image-rendering: auto; user-select: none;
 }
+/* Only ever applied on a CASE change (app.js). Scrubbing slices must stay a
+   1:1 response to the slider -- it happens constantly, and animating it
+   would make the scan feel laggy rather than smooth. */
+.viewport img.swap { animation: sliceIn 180ms var(--ease-out); }
+@keyframes sliceIn { from { opacity: 0.3; } }
+
 .viewport canvas {
   position: absolute; inset: 0; width: 100%; height: 100%;
   cursor: crosshair;
@@ -357,6 +370,28 @@ button { font: inherit; cursor: pointer; border-radius: 999px; }
 
 @keyframes settle {
   from { opacity: 0; transform: translateY(-3px); }
+}
+
+/* A measurement is occasional, so it can afford to arrive in order rather
+   than land all at once: judgement, then caveats, then the outline, then
+   the figures. 45ms apart -- long enough to read as a sequence, short
+   enough that the whole thing is settled in under a third of a second. */
+.reveal > *, .reveal .figures div {
+  animation: rise 300ms var(--ease-out) backwards;
+}
+.reveal .conf              { animation-delay: 0ms; }
+.reveal .flags             { animation-delay: 45ms; }
+.reveal .overlay           { animation-delay: 90ms; }
+.reveal .figures div:nth-child(1) { animation-delay: 135ms; }
+.reveal .figures div:nth-child(2) { animation-delay: 165ms; }
+.reveal .figures div:nth-child(3) { animation-delay: 195ms; }
+.reveal .figures div:nth-child(4) { animation-delay: 225ms; }
+.reveal .prov              { animation-delay: 255ms; }
+.reveal .raw               { animation-delay: 255ms; }
+.reveal .figures           { animation: none; }
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(6px); }
 }
 
 .flags { list-style: none; margin: 0 0 1.1rem; padding: 0; }
