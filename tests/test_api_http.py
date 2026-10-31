@@ -347,3 +347,31 @@ def test_suggest_still_works_on_an_roi_sized_case(client):
     s = client.get(f"/api/cases/{case['case_id']}/suggest").json()
     assert s["source"] in ("auto", "centred_fallback")
     assert s["box"] is not None
+
+
+def test_healthz_trusts_the_heartbeat_not_rqs_registry(client):
+    """
+    RQ writes its worker registry ONCE, at worker startup. Restart Redis and
+    that record is gone while the worker carries on draining the queue, so
+    workers_alive reads 0 for a worker that is visibly working -- which is
+    exactly what happened in practice.
+
+    worker_live comes from the worker's own expiring heartbeat instead, so it
+    recovers on its own once the worker writes again.
+    """
+    import json
+    from backend.api import main
+    from backend.common import settings
+
+    main._redis.delete(settings.WORKER_STATUS_KEY)
+    body = client.get("/healthz").json()
+    assert body["worker_live"] is False, "nothing has published a heartbeat"
+
+    main._redis.set(settings.WORKER_STATUS_KEY,
+                   json.dumps({"device": "cuda", "checkpoint_present": True}))
+
+    body = client.get("/healthz").json()
+    assert body["worker_live"] is True, \
+        "a heartbeat is present, so the API must report a live worker"
+    assert body["workers_alive"] == 0, \
+        "RQ's registry is still empty -- that is the whole point of the fix"

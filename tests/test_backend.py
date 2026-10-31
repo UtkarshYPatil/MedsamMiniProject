@@ -1023,3 +1023,29 @@ def test_a_dicom_zip_bomb_is_refused(monkeypatch):
 
     with pytest.raises(dicomseries.DicomError, match="expands to"):
         dicomseries.read_zip(raw)
+
+
+def test_publish_status_sets_an_expiry_so_a_dead_worker_disappears():
+    """
+    The bug this prevents: the key is written once, the worker dies, and
+    /healthz goes on reporting a live worker forever because nothing ever
+    deletes the key. An expiry makes absence detectable without anyone
+    having to notice and clean up.
+    """
+    from backend.common import settings
+    from backend.worker import tasks
+
+    seen = {}
+
+    class FakeRedis:
+        def set(self, key, value, ex=None, **kw):
+            seen["key"], seen["ex"] = key, ex
+
+    tasks.publish_status(FakeRedis())
+
+    assert seen["key"] == settings.WORKER_STATUS_KEY
+    assert seen["ex"] == settings.WORKER_HEARTBEAT_TTL, \
+        "publish_status must set a TTL, or a dead worker stays 'alive' forever"
+    assert settings.WORKER_HEARTBEAT_TTL > settings.WORKER_HEARTBEAT_SECONDS * 2, \
+        ("the key must outlive at least two missed heartbeats, or a slow "
+         "moment makes a healthy worker flicker out of existence")

@@ -97,8 +97,13 @@ def healthz():
     `config` is this container's own settings. `worker` is what the worker
     reported about itself, which is the only trustworthy answer about the
     device: this container has no torch and cannot tell a GPU from a toaster.
-    `workers_alive` comes from RQ's own registry, so a queue that is filling
-    up with nobody to drain it is visible instead of looking like slowness.
+
+    `worker_live` is the signal to trust, because the worker refreshes that
+    key on a timer and it expires if nothing refreshes it. `workers_alive`
+    comes from RQ's registry, which is written ONCE when a worker starts: a
+    Redis restart erases it and a healthy worker then reports as absent for
+    as long as it keeps running. It is kept as a diagnostic, not as the
+    answer to "can anything drain this queue".
     """
     try:
         _redis.ping()
@@ -125,6 +130,8 @@ def healthz():
         "redis": redis_ok,
         "queued": len(queue),
         "workers_alive": alive,
+        # The heartbeat, not the registry: see the docstring.
+        "worker_live": worker is not None,
         "worker": worker,
         "config": settings.summary(),
         # Kept so an older UI build does not break on a new API.

@@ -90,7 +90,11 @@ async function health() {
     el.device.className = "state live";
     el.queue.textContent = h.queued ? `${h.queued} queued` : "";
 
-    if (h.workers_alive === 0) {
+    // worker_live is the heartbeat; workers_alive is RQ's registry, which a
+    // Redis restart erases while the worker carries on working. Trust the
+    // heartbeat, and fall back to the registry only on an older API.
+    const live = h.worker_live !== undefined ? h.worker_live : h.workers_alive !== 0;
+    if (!live) {
       el.device.textContent = "no worker connected";
       el.device.className = "state down";
       setStatus("No worker is connected, so a measurement would queue and " +
@@ -212,6 +216,18 @@ async function proposeBox(id) {
   if (!sg || sg.box === null) {
     const detail = sg && sg.info && sg.info.detail;
     if (detail) alert_(detail, "warn");
+    return;
+  }
+
+  // A sub-millimetre box is not a proposal, it is noise -- and the tool
+  // already refuses to trust anything under 4mm. Offering it would enable
+  // Measure on a box that cannot produce a usable number.
+  const [, spy, spx] = state.spacing || [1, 1, 1];
+  const bw = (sg.box[2] - sg.box[0]) * spx, bh = (sg.box[3] - sg.box[1]) * spy;
+  if (bw < 4 || bh < 4) {
+    alert_("The automatic prompt did not find anything convincing on this " +
+           "case, so no starting box was placed. Draw one around the nodule.",
+           "warn");
     return;
   }
 

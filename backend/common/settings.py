@@ -41,6 +41,16 @@ API_URL = os.environ.get("API_URL", "http://api:8000")
 # the API from ever seeing a worker again, with no error anywhere.
 WORKER_STATUS_KEY = "worker:status"
 
+# The status key is written with a TTL and refreshed on a timer, so it is a
+# HEARTBEAT rather than a flag. This matters because RQ registers a worker in
+# Redis once, at startup: if Redis restarts, a perfectly healthy worker keeps
+# draining the queue while Worker.count() reports zero, forever. A key that
+# expires unless refreshed cannot get stuck in either direction -- it comes
+# back within one interval of Redis returning, and it disappears within TTL
+# of the worker actually dying.
+WORKER_HEARTBEAT_SECONDS = int(os.environ.get("WORKER_HEARTBEAT_SECONDS", "15"))
+WORKER_HEARTBEAT_TTL = int(os.environ.get("WORKER_HEARTBEAT_TTL", "45"))
+
 # Comma-separated origins, or "*". Fine as "*" on localhost; narrow it for
 # anything reachable from a network.
 CORS_ORIGINS = [o.strip() for o in

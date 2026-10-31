@@ -9,11 +9,41 @@ API does not call the model directly.
 """
 import logging
 import sys
+import time
 
 from redis import Redis
 from rq import Queue, SimpleWorker
 
 from backend.common import settings
+from backend.worker.tasks import publish_status
+
+
+def start_heartbeat(conn, log):
+    """
+    Refresh the status key on a timer, forever, in the background.
+
+    Without this the key is written once at boot. RQ's own registration has
+    the same flaw, and it bites on a Redis restart: the worker reconnects and
+    keeps completing jobs, but every record of it is gone, so /healthz reports
+    "no worker connected" while the worker is visibly working. A refreshed,
+    expiring key recovers on its own within one interval.
+
+    A daemon thread, so it never keeps a shutting-down worker alive, and it
+    swallows everything -- a failed heartbeat must not stop real work.
+    """
+    import threading
+
+    def beat():
+        while True:
+            time.sleep(settings.WORKER_HEARTBEAT_SECONDS)
+            try:
+                publish_status(conn)
+            except Exception:                    # pragma: no cover - defensive
+                log.debug("heartbeat failed", exc_info=True)
+
+    threading.Thread(target=beat, name="heartbeat", daemon=True).start()
+    log.info("heartbeat every %ss, key expires after %ss",
+             settings.WORKER_HEARTBEAT_SECONDS, settings.WORKER_HEARTBEAT_TTL)
 
 
 def main():
@@ -41,7 +71,7 @@ def main():
                     "-f docker-compose.gpu.yml and check the host with: "
                     "docker run --rm --gpus all nvidia/cuda:12.8.0-base-ubuntu24.04 nvidia-smi")
 
-    from backend.worker.tasks import checkpoint_present, publish_status
+    from backend.worker.tasks import checkpoint_present
     if not settings.DRY_RUN:
         if not checkpoint_present():
             # Refuse to start rather than accept jobs it cannot serve. The
@@ -63,6 +93,7 @@ def main():
     # Tell /healthz what this worker actually resolved, so the UI can stop
     # guessing from the API's own environment.
     publish_status(conn)
+    start_heartbeat(conn, log)
 
     # SimpleWorker runs jobs in-process instead of forking. Forking per job
     # would discard the loaded model every time, which on CPU costs more than

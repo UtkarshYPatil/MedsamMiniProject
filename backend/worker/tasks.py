@@ -47,9 +47,16 @@ def worker_status() -> dict:
     }
 
 
-def publish_status(conn=None) -> dict:
+def publish_status(conn=None, ttl: int | None = None) -> dict:
     """
-    Best-effort: write the worker's resolved state where the API can see it.
+    Best-effort heartbeat: write the worker's resolved state where the API
+    can see it, with a TTL so the absence of a worker is detectable.
+
+    The TTL is the point. Written without one, this key outlives the process
+    that wrote it and the API goes on reporting a worker that died hours ago.
+    Written with one and refreshed on a timer, it answers "is a worker alive
+    right now" correctly in both directions, including across a Redis restart
+    that wipes RQ's own registration.
 
     Never raises. A status line failing to publish must not take down the
     worker that is doing the actual work.
@@ -59,7 +66,8 @@ def publish_status(conn=None) -> dict:
         if conn is None:
             from redis import Redis
             conn = Redis.from_url(settings.REDIS_URL)
-        conn.set(STATUS_KEY, json.dumps(st))
+        conn.set(STATUS_KEY, json.dumps(st),
+                 ex=settings.WORKER_HEARTBEAT_TTL if ttl is None else ttl)
     except Exception:
         pass
     return st
